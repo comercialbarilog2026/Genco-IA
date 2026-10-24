@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GENCO IA</title>
+<meta name="description" content="GENCO IA: a inteligência que qualifica os e-mails da sua equipe, indica quem cuida de cada um e deixa as respostas prontas.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <h1 class="mark"><i></i>GENCO <span>IA</span></h1>
+  </div>
+</header>
+
+<main class="landing">
+  <div class="landing-in">
+    <section class="pitch">
+      <span class="cap">Assistente de e-mails para equipes</span>
+      <h2>Sua equipe sabe o que responder primeiro. <em>Todos os dias.</em></h2>
+      <p>A GENCO IA lê a caixa de cada pessoa, qualifica os e-mails por urgência, indica quem deve cuidar de cada um e deixa as respostas prontas no próprio e-mail. Você conversa com ela como com um colega.</p>
+      <ul class="points">
+        <li><i></i><div><b>Qualificação automática.</b> <span>Urgente, alta, normal ou baixa, com o motivo, pelos critérios da sua empresa.</span></div></li>
+        <li><i></i><div><b>Nada fica parado.</b> <span>E-mails sem resposta além do prazo aparecem antes que o cliente cobre.</span></div></li>
+        <li><i></i><div><b>Respostas prontas, nunca enviadas sozinhas.</b> <span>Os rascunhos ficam no seu Gmail ou Outlook para você revisar e enviar.</span></div></li>
+        <li><i></i><div><b>Visão do gestor.</b> <span>Pendências e atrasos por pessoa, sem expor o conteúdo dos e-mails.</span></div></li>
+      </ul>
+    </section>
+
+    <section class="authcard" aria-label="Acesso">
+      <div class="seg" id="seg">
+        <button type="button" id="tabSignup" aria-pressed="true">Criar conta</button>
+        <button type="button" id="tabLogin" aria-pressed="false">Entrar</button>
+      </div>
+
+      <form id="fSignup" novalidate>
+        <div class="field"><label for="sEmpresa">Empresa</label><input id="sEmpresa" autocomplete="organization" required></div>
+        <div class="field"><label for="sSetor">Ramo</label><select id="sSetor">
+          <option value="geral">Empresa em geral</option>
+          <option value="comex">Comércio exterior / despacho aduaneiro</option>
+          <option value="distribuicao">Distribuição e atacado</option>
+        </select></div>
+        <div class="field"><label for="sNome">Seu nome</label><input id="sNome" autocomplete="name" required></div>
+        <div class="field"><label for="sEmail">E-mail de trabalho</label><input id="sEmail" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="sSenha">Senha</label><input id="sSenha" type="password" autocomplete="new-password" minlength="8" required></div>
+        <p class="formerr" id="eSignup" role="alert"></p>
+        <button type="submit" class="btn brand">Começar teste grátis</button>
+        <p class="fine" id="trialNote">Teste grátis, sem cartão. Você assina só se fizer sentido.</p>
+      </form>
+
+      <form id="fLogin" novalidate hidden>
+        <div class="field"><label for="lEmail">E-mail</label><input id="lEmail" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="lSenha">Senha</label><input id="lSenha" type="password" autocomplete="current-password" required></div>
+        <p class="formerr" id="eLogin" role="alert"></p>
+        <button type="submit" class="btn">Entrar</button>
+      </form>
+
+      <form id="fInvite" novalidate hidden>
+        <p id="inviteText"></p>
+        <div class="field"><label for="iSenha">Crie sua senha</label><input id="iSenha" type="password" autocomplete="new-password" minlength="8" required></div>
+        <p class="formerr" id="eInvite" role="alert"></p>
+        <button type="submit" class="btn brand">Entrar na equipe</button>
+      </form>
+    </section>
+  </div>
+</main>
+<script src="/auth.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "genco-ia",
+  "version": "0.1.0",
+  "description": "GENCO IA — assistente de e-mails com IA para equipes, com assinatura própria.",
+  "main": "src/server.js",
+  "private": true,
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "dev": "node --no-warnings --watch src/server.js",
+    "test": "node --no-warnings test/e2e.js"
+  },
+  "license": "UNLICENSED"
+}

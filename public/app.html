@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GENCO IA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <h1 class="mark"><i></i>GENCO <span>IA</span></h1>
+    <nav class="nav" id="nav" aria-label="Seções">
+      <button type="button" data-view="conversa" aria-current="page">Conversa</button>
+      <button type="button" data-view="equipe" hidden>Equipe</button>
+      <button type="button" data-view="config">Configurações</button>
+    </nav>
+    <div class="ctl">
+      <span class="who" id="who"></span>
+      <button type="button" class="txtbtn" id="bNew">Nova conversa</button>
+      <button type="button" class="txtbtn" id="bLogout">Sair</button>
+    </div>
+  </div>
+</header>
+<div class="banner" id="banner" hidden><div class="banner-in" id="bannerIn"></div></div>
+
+<!-- Conversa -->
+<section id="v-conversa" class="view-wrap" style="display:contents">
+  <div class="pulse" id="pulse" hidden><div class="pulse-in" id="pulseIn"></div></div>
+  <main class="chat" id="chat"><div class="chat-in" id="log"></div></main>
+  <div class="composer" id="composer">
+    <div class="composer-in">
+      <form class="box" id="form">
+        <textarea id="input" rows="1" placeholder="Pergunte o que precisa saber sobre a sua caixa" aria-label="Mensagem para a GENCO IA"></textarea>
+        <button type="submit" class="send" id="send" aria-label="Enviar"></button>
+      </form>
+      <div class="hint">A GENCO IA prepara as respostas; quem envia é você.</div>
+    </div>
+  </div>
+</section>
+
+<!-- Equipe -->
+<main id="v-equipe" class="view" hidden><div class="page" id="equipe"></div></main>
+
+<!-- Configurações -->
+<main id="v-config" class="view" hidden><div class="page" id="config"></div></main>
+
+<div class="toast" id="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
