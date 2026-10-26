@@ -65,7 +65,7 @@ function serveStatic(root, req, res) {
   let p = decodeURIComponent(url.pathname);
   if (p === "/") p = "/index.html";
   if (p === "/app" || p === "/app/") p = "/app.html";
-  if (p === "/convite") p = "/index.html";
+  if (p === "/convite" || p === "/redefinir") p = "/index.html";
   if (p === "/quem") p = "/quem.html";
   const file = path.normalize(path.join(root, p));
   if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return false;

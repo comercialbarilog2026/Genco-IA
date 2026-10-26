@@ -31,6 +31,10 @@ const config = {
   google: { clientId: env("GOOGLE_CLIENT_ID"), clientSecret: env("GOOGLE_CLIENT_SECRET") },
   microsoft: { clientId: env("MICROSOFT_CLIENT_ID"), clientSecret: env("MICROSOFT_CLIENT_SECRET") },
   stripe: { secretKey: env("STRIPE_SECRET_KEY"), priceId: env("STRIPE_PRICE_ID"), webhookSecret: env("STRIPE_WEBHOOK_SECRET") },
+  // E-mails do próprio sistema (resumo diário, recuperação de senha). Opcional.
+  smtp: { host: env("SMTP_HOST"), port: num("SMTP_PORT", 587), secure: env("SMTP_SECURE", "") ? env("SMTP_SECURE") === "true" : num("SMTP_PORT", 587) === 465,
+    user: env("SMTP_USER"), pass: env("SMTP_PASS"), from: env("SMTP_FROM") },
+  digestHour: num("DIGEST_HOUR", 8),          // hora padrão do resumo diário (horário de Brasília)
   trialDays: num("TRIAL_DAYS", 14),
   syncMinutes: num("SYNC_MINUTES", 15),
   autoTriage: env("AUTO_TRIAGE", "true") !== "false",
@@ -50,7 +54,8 @@ config.features = {
   gmail: !!(config.google.clientId && config.google.clientSecret),
   outlook: !!(config.microsoft.clientId && config.microsoft.clientSecret),
   stripe: !!(config.stripe.secretKey && config.stripe.priceId),
-  imap: true // qualquer provedor por IMAP, sem configuração no servidor
+  imap: true, // qualquer provedor por IMAP, sem configuração no servidor
+  email: !!(env("SMTP_HOST") && env("SMTP_FROM"))
 };
 
 module.exports = config;

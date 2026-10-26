@@ -7,8 +7,8 @@ const crypto = require("node:crypto");
 const assert = require("node:assert");
 
 const dbFile = path.join(os.tmpdir(), `genco-ia-test-${Date.now()}.db`);
-Object.assign(process.env, { DATABASE_PATH: dbFile, AI_PROVIDER: "mock", APP_URL: "http://localhost:0", STRIPE_WEBHOOK_SECRET: "whsec_test_123", APP_SECRET: "x".repeat(40) });
-const { server } = require("../src/server");
+const fakeSmtp = require("./fake-smtp");
+let smtpBox, server;
 
 let base;
 const jar = {};
@@ -21,6 +21,10 @@ async function call(who, method, url, body, headers = {}) {
 const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
 
 (async () => {
+  smtpBox = await fakeSmtp.start();
+  Object.assign(process.env, { DATABASE_PATH: dbFile, AI_PROVIDER: "mock", APP_URL: "http://localhost:0", STRIPE_WEBHOOK_SECRET: "whsec_test_123", APP_SECRET: "x".repeat(40),
+    SMTP_HOST: "127.0.0.1", SMTP_PORT: String(smtpBox.port), SMTP_SECURE: "false", SMTP_USER: "app", SMTP_PASS: "x", SMTP_FROM: "GENCO IA <nao-responda@genco-ia.com.br>" });
+  ({ server } = require("../src/server"));
   await new Promise(r => server.listen(0, r));
   base = `http://localhost:${server.address().port}`;
   try {
@@ -198,6 +202,28 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     assert.ok(r.data.members.some(m => m.email === "rafael.costa@brcomexx.com.br" && m.name === "Rafael Costa" && m.origem === "email")); step("IMAP no grupo: Rafael detectado automaticamente pela resposta dele");
     fake.server.close();
 
+    // ---------- resumo diário e recuperação de senha (SMTP simulado) ----------
+    r = await call("ana", "GET", "/api/digest");
+    assert.equal(r.data.enabled, true); assert.ok(r.data.total > 0); assert.ok(/Grupo Operacional: equipe/.test(r.data.html)); step(`Resumo diário montado (${r.data.subject})`);
+    r = await call("ana", "POST", "/api/digest/send"); assert.equal(r.status, 200);
+    let sent = smtpBox.inbox.at(-1); assert.equal(sent.to, "ana@exemplo.com"); assert.ok(/precisam de atenção/.test(fakeSmtp.bodyText(sent.raw))); step("Resumo enviado por e-mail para a responsável");
+    const digest = require("../src/digest"), { run: dbRun } = require("../src/db");
+    dbRun("UPDATE users SET digest_hour = 0, last_digest_day = NULL"); dbRun("UPDATE users SET digest_on = 0 WHERE email != 'ana@exemplo.com'");
+    const wd = digest.localNow().weekday;
+    if (wd !== "Sat" && wd !== "Sun") { assert.equal(await digest.runDue(), 1); assert.equal(await digest.runDue(), 0); step("Resumo automático sai uma vez por dia útil"); }
+    r = await call("ana", "PUT", "/api/digest", { on: false, hour: 9 }); assert.equal(r.data.on, false); step("Pessoa desliga o resumo nas configurações");
+
+    const before = smtpBox.inbox.length;
+    r = await call("anon", "POST", "/api/password/forgot", { email: "ninguem@exemplo.com" }); assert.equal(r.status, 200);
+    r = await call("anon", "POST", "/api/password/forgot", { email: "bruno@exemplo.com" }); assert.equal(r.status, 200);
+    await new Promise(res => setTimeout(res, 300));
+    assert.equal(smtpBox.inbox.length, before + 1); sent = smtpBox.inbox.at(-1); assert.equal(sent.to, "bruno@exemplo.com");
+    const resetToken = fakeSmtp.bodyText(sent.raw).match(/token=([\w-]+)/)[1]; step("Esqueci a senha: link enviado só para quem tem conta");
+    r = await call("anon", "POST", "/api/password/reset", { token: resetToken, senha: "nova-senha-77" }); assert.equal(r.status, 200);
+    r = await call("anon", "POST", "/api/password/reset", { token: resetToken, senha: "nova-senha-78" }); assert.equal(r.status, 400);
+    r = await call("bruno2", "POST", "/api/login", { email: "bruno@exemplo.com", senha: "nova-senha-77" }); assert.equal(r.status, 200);
+    r = await call("bruno", "GET", "/api/state"); assert.equal(r.status, 401); step("Nova senha funciona, link vale uma vez e sessões antigas caem");
+
     r = await call("ana", "POST", "/api/billing/checkout");
     assert.equal(r.status, 503); step("Assinatura avisa que o Stripe ainda não foi configurado");
 
@@ -224,7 +250,7 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
   } catch (e) {
     console.error("\nFalhou:", e.message); process.exitCode = 1;
   } finally {
-    server.close(); fs.rmSync(dbFile, { force: true }); ["-wal", "-shm"].forEach(s => fs.rmSync(dbFile + s, { force: true }));
+    server.close(); smtpBox?.server.close(); fs.rmSync(dbFile, { force: true }); ["-wal", "-shm"].forEach(s => fs.rmSync(dbFile + s, { force: true }));
     setTimeout(() => process.exit(), 50);
   }
 })();

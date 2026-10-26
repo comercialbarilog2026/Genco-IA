@@ -18,6 +18,8 @@ O cliente paga apenas a assinatura da GENCO IA. O modelo de IA é contratado pel
 | Gestor | Tela "Equipe" com urgentes, atrasados, respostas prontas e e-mails a qualificar por pessoa |
 | Grupos de e-mail | Caixa compartilhada (ex.: operacional@) atendida por várias pessoas: fila única, dono e situação de cada e-mail, notas internas, histórico, carga por pessoa e atribuição automática pela IA |
 | Controle de custo | Registro de uso da IA por empresa e usuário, limite mensal de mensagens por usuário |
+| Resumo diário | Nos dias úteis, cada pessoa recebe por e-mail o que está pendente (caixa própria e grupos); o responsável do grupo recebe também a situação de cada pessoa. Horário ajustável ou desligável por pessoa, com prévia no app |
+| Senha | "Esqueci minha senha" com link por e-mail (vale 1 hora, uma vez); também serve para quem foi detectado no grupo criar a própria senha |
 | Demonstração | Caixas de e-mail fictícias (comércio exterior e distribuição) para testar sem conectar e-mail real |
 
 Tudo roda **sem dependências externas**: só Node.js 22.13 ou superior (banco SQLite nativo, criptografia nativa, chamadas diretas às APIs).
@@ -121,6 +123,12 @@ Também roda em qualquer serviço com Node.js ou Docker (Railway, Fly.io, Digita
 5. Copie para `MICROSOFT_CLIENT_ID` e `MICROSOFT_CLIENT_SECRET`.
 6. Para vender a outras empresas, faça a **verificação de publicador**. Algumas empresas clientes exigem que o administrador de TI delas aprove o app.
 
+### E-mails do sistema (SMTP) — resumo diário e "esqueci minha senha"
+1. Use qualquer conta SMTP. Para começar, uma caixa como `nao-responda@suaempresa.com.br` no próprio provedor da empresa resolve (Locaweb, Google Workspace com senha de app, Microsoft 365). Para volume maior, um serviço transacional (SendGrid, Resend, Amazon SES).
+2. Preencha `SMTP_HOST`, `SMTP_PORT` (587 com STARTTLS ou 465 com SSL), `SMTP_USER`, `SMTP_PASS` e `SMTP_FROM`.
+3. Configure SPF e DKIM do domínio de envio no provedor de DNS, para os resumos não caírem no spam.
+4. Sem SMTP, o app funciona normalmente; só ficam desligados o resumo por e-mail e a recuperação de senha (a prévia do resumo continua em Configurações).
+
 ### 5. Stripe (assinatura)
 1. No Dashboard do Stripe, crie o produto **GENCO IA** com um **preço recorrente mensal por usuário** (em BRL). Copie o ID do preço para `STRIPE_PRICE_ID`.
 2. Copie a chave secreta para `STRIPE_SECRET_KEY`.
@@ -162,7 +170,5 @@ test/e2e.js        teste automático do fluxo completo
 ## Próximos passos recomendados para o desenvolvedor
 1. Migrar o banco para PostgreSQL quando houver muitos clientes (as tabelas já estão prontas para isso).
 2. Fila de processamento para a leitura das caixas, em vez do agendador em memória, se houver centenas de usuários.
-3. Resumo diário por e-mail para o gestor (envio por um serviço transacional).
 4. Painel lateral dentro do Gmail e do Outlook (add-in), reaproveitando a mesma API.
 5. Página de preços, termos de uso e política de privacidade.
-6. Recuperação de senha por e-mail.

@@ -213,6 +213,7 @@
           <div class="actions"><button type="button" class="btn ghost" id="cSync">Ler agora</button><button type="button" class="btn ghost" id="cSwap">Trocar de e-mail</button><button type="button" class="btn ghost" id="cOff">Desconectar</button></div>`
         : `<p class="muted">Nenhum e-mail conectado.</p><div class="actions"><button type="button" class="btn" id="cSwap">Conectar e-mail</button></div>`}
       </div>
+      <div class="panel" id="digestPanel"><h3>Resumo diário por e-mail</h3><p class="muted small">Carregando…</p></div>
       <div class="panel"><h3>Equipe e regras</h3>
         <p class="small muted">A GENCO IA usa estas regras para qualificar e indicar o responsável de cada e-mail. ${canRules() ? "Você também pode mudar conversando com ela." : "Só administradores e gestores podem alterar."}</p>
         <div id="teamRows" style="display:grid;gap:8px">${teamRows(S.rules.team)}</div>
@@ -233,6 +234,7 @@
         <div class="actions">${S.company.hasSubscription ? `<button type="button" class="btn ghost" id="bPortal">Gerenciar assinatura e pagamento</button>` : `<button type="button" class="btn brand" id="bCheckout" ${S.features.stripe ? "" : "disabled"}>Assinar a GENCO IA</button>`}</div>
         <p class="small muted">Uso neste mês: ${S.usage.month} de ${S.usage.limit} mensagens para a IA.</p></div>` : ""}`;
 
+    loadDigest();
     const ro = !canRules();
     $("config").querySelectorAll("#teamRows input, #cCoord, #cAtraso, #cUrg, #cTom").forEach(el => el.disabled = ro);
     $("cSwap") && ($("cSwap").onclick = async () => { box = null; await refresh(); S.account = null; S.chat = []; show("conversa"); renderChat(); });
@@ -259,6 +261,31 @@
       $("bPortal") && ($("bPortal").onclick = async () => { try { location.href = (await api("POST", "/api/billing/portal")).url; } catch (e) { toast(e.message); } });
     }
   }
+  async function loadDigest() {
+    const box = $("digestPanel"); if (!box) return;
+    try {
+      const d = await api("GET", "/api/digest");
+      const hours = [6, 7, 8, 9, 10, 11, 12, 13, 14];
+      box.innerHTML = `<h3>Resumo diário por e-mail</h3>
+        <p class="small muted">Nos dias úteis, a GENCO IA manda para <b>${esc(d.email)}</b> o que está pendente: o que responder primeiro, o que está com você nos grupos e, para o responsável de um grupo, a situação de cada pessoa.</p>
+        <div class="actions"><label class="check"><input type="checkbox" id="dgOn" ${d.on ? "checked" : ""}> Receber o resumo</label>
+          <select id="dgHour" class="pillsel" aria-label="Horário">${hours.map(h => `<option value="${h}" ${h === d.hour ? "selected" : ""}>às ${h}h</option>`).join("")}</select>
+          <button type="button" class="btn ghost" id="dgSave">Salvar</button></div>
+        <div class="actions"><button type="button" class="btn ghost" id="dgPrev">Ver como fica o de hoje</button>
+          <button type="button" class="btn ghost" id="dgSend" ${d.enabled ? "" : "disabled"}>Enviar para mim agora</button></div>
+        ${d.enabled ? "" : `<p class="small muted">O envio de e-mails ainda não foi configurado neste servidor. O administrador do sistema precisa preencher o SMTP.</p>`}
+        <div id="dgView"></div>`;
+      $("dgSave").onclick = async () => { try { await api("PUT", "/api/digest", { on: $("dgOn").checked, hour: Number($("dgHour").value) }); toast($("dgOn").checked ? `Resumo diário às ${$("dgHour").value}h` : "Resumo diário desligado"); } catch (e) { toast(e.message); } };
+      $("dgPrev").onclick = () => {
+        const v = $("dgView");
+        if (v.innerHTML) { v.innerHTML = ""; $("dgPrev").textContent = "Ver como fica o de hoje"; return; }
+        v.innerHTML = `<p class="small"><b>Assunto:</b> ${esc(d.subject)}</p><iframe class="dgframe" title="Prévia do resumo" sandbox></iframe>`;
+        v.querySelector("iframe").srcdoc = d.html; $("dgPrev").textContent = "Fechar prévia";
+      };
+      $("dgSend").onclick = async () => { $("dgSend").disabled = true; try { const r = await api("POST", "/api/digest/send"); toast("Resumo enviado para " + r.email); } catch (e) { toast(e.message); } $("dgSend").disabled = false; };
+    } catch (e) { box.innerHTML = `<h3>Resumo diário por e-mail</h3><p class="err">${esc(e.message)}</p>`; }
+  }
+
   async function loadUsers() {
     try {
       const d = await api("GET", "/api/users");

@@ -9,9 +9,10 @@
   }
   function tab(which) {
     $("fSignup").hidden = which !== "signup"; $("fLogin").hidden = which !== "login"; $("fInvite").hidden = which !== "invite";
+    $("fForgot").hidden = which !== "forgot"; $("fReset").hidden = which !== "reset";
     $("tabSignup").setAttribute("aria-pressed", String(which === "signup"));
     $("tabLogin").setAttribute("aria-pressed", String(which === "login"));
-    $("seg").hidden = which === "invite";
+    $("seg").hidden = ["invite", "forgot", "reset"].includes(which);
   }
   $("tabSignup").onclick = () => tab("signup");
   $("tabLogin").onclick = () => tab("login");
@@ -30,8 +31,20 @@
   wire($("fSignup"), "eSignup", () => post("/api/signup", { empresa: $("sEmpresa").value, setor: $("sSetor").value, modo: (document.querySelector('input[name="sModo"]:checked') || {}).value, nome: $("sNome").value, email: $("sEmail").value, senha: $("sSenha").value }));
   wire($("fLogin"), "eLogin", () => post("/api/login", { email: $("lEmail").value, senha: $("lSenha").value }));
 
+  $("toForgot").onclick = () => { $("fEmail").value = $("lEmail").value; tab("forgot"); $("fEmail").focus(); };
+  $("backLogin").onclick = () => tab("login");
+  $("fForgot").addEventListener("submit", async ev => {
+    ev.preventDefault(); $("eForgot").textContent = "";
+    const btn = $("fForgot").querySelector("button[type=submit]"); btn.disabled = true;
+    try { const d = await post("/api/password/forgot", { email: $("fEmail").value }); $("fForgot").querySelector("p").textContent = d.message; btn.hidden = true; }
+    catch (e) { $("eForgot").textContent = e.message; btn.disabled = false; }
+  });
+
   const token = new URLSearchParams(location.search).get("token");
-  if (token) {
+  if (token && location.pathname === "/redefinir") {
+    tab("reset");
+    wire($("fReset"), "eReset", () => post("/api/password/reset", { token, senha: $("rSenha").value }));
+  } else if (token) {
     tab("invite");
     fetch("/api/invite/" + encodeURIComponent(token)).then(r => r.json().then(d => ({ ok: r.ok, d }))).then(({ ok, d }) => {
       if (!ok) { $("inviteText").textContent = d.error || "Convite inválido."; $("fInvite").querySelector("button").disabled = true; return; }

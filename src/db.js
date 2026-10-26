@@ -142,6 +142,11 @@ function addColumn(table, column, ddl) {
 addColumn("users", "kind", "kind TEXT NOT NULL DEFAULT 'pessoa'");   // pessoa | grupo
 addColumn("chats", "box_id", "box_id INTEGER");                     // NULL = caixa pessoal
 addColumn("groups", "password_hash", "password_hash TEXT");
+addColumn("users", "digest_on", "digest_on INTEGER NOT NULL DEFAULT 1");   // resumo diário por e-mail
+addColumn("users", "digest_hour", "digest_hour INTEGER");                   // NULL = hora padrão (DIGEST_HOUR)
+addColumn("users", "last_digest_day", "last_digest_day TEXT");
+addColumn("users", "reset_token_hash", "reset_token_hash TEXT");            // recuperação de senha
+addColumn("users", "reset_expires", "reset_expires INTEGER");
 addColumn("companies", "modo", "modo TEXT NOT NULL DEFAULT 'equipe'");       // individual (uma pessoa, um e-mail) | equipe          // acesso da equipe pelo e-mail do grupo
 addColumn("group_members", "origem", "origem TEXT NOT NULL DEFAULT 'manual'"); // manual | google | email | demo
 db.exec(`CREATE TABLE IF NOT EXISTS group_excluded (     -- pessoas que o gestor tirou do grupo: a detecção não as recoloca

@@ -60,6 +60,22 @@
         <div class="field"><label for="lSenha">Senha</label><input id="lSenha" type="password" autocomplete="current-password" required></div>
         <p class="formerr" id="eLogin" role="alert"></p>
         <button type="submit" class="btn">Entrar</button>
+        <button type="button" class="linkbtn" id="toForgot">Esqueci minha senha</button>
+      </form>
+
+      <form id="fForgot" novalidate hidden>
+        <p>Digite o seu e-mail. Enviamos um link para você criar uma nova senha.</p>
+        <div class="field"><label for="fEmail">E-mail</label><input id="fEmail" type="email" autocomplete="email" required></div>
+        <p class="formerr" id="eForgot" role="alert"></p>
+        <button type="submit" class="btn">Enviar link</button>
+        <button type="button" class="linkbtn" id="backLogin">Voltar para entrar</button>
+      </form>
+
+      <form id="fReset" novalidate hidden>
+        <p>Crie a sua nova senha.</p>
+        <div class="field"><label for="rSenha">Nova senha</label><input id="rSenha" type="password" autocomplete="new-password" minlength="8" required></div>
+        <p class="formerr" id="eReset" role="alert"></p>
+        <button type="submit" class="btn brand">Salvar e entrar</button>
       </form>
 
       <form id="fInvite" novalidate hidden>

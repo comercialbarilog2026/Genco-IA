@@ -10,6 +10,8 @@ const mail = require("./mail");
 const ai = require("./ai");
 const agent = require("./agent");
 const groups = require("./groups");
+const smtp = require("./smtp");
+const digest = require("./digest");
 const { SECTORS, defaultRules } = require("./templates");
 
 const router = createRouter();
@@ -129,6 +131,55 @@ router.post("/api/invite/accept", async ({ req, res, body }) => {
   if (String(body.senha || "").length < 8) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
   run("UPDATE users SET password_hash = ?, invite_token = NULL WHERE id = ?", sec.hashPassword(String(body.senha)), u.id);
   send(res, 200, { ok: true }, { "Set-Cookie": sec.sessionCookie(sec.createSession(u.id)) });
+});
+
+// ---------- recuperação de senha ----------
+router.post("/api/password/forgot", async ({ req, res, body }) => {
+  throttle("forgot:" + ip(req), 5);
+  const email = String(body.email || "").trim().toLowerCase();
+  const u = one("SELECT * FROM users WHERE email = ? AND kind = 'pessoa'", email);
+  // Resposta igual exista ou não a conta (não revela quem tem cadastro).
+  const okMsg = { ok: true, message: "Se houver uma conta com este e-mail, enviamos um link para criar uma nova senha. Ele vale por 1 hora." };
+  if (!smtp.enabled()) throw new HttpError(503, "A recuperação por e-mail ainda não foi configurada neste servidor. Peça ao administrador da sua empresa um novo convite.");
+  if (u) {
+    const token = sec.randomToken(24);
+    run("UPDATE users SET reset_token_hash = ?, reset_expires = ? WHERE id = ?", sec.sha(token), now() + 3600e3, u.id);
+    const link = `${config.appUrl}/redefinir?token=${token}`;
+    smtp.sendMail({ to: u.email, subject: "GENCO IA · criar nova senha",
+      text: `Olá, ${u.name.split(" ")[0]}.\n\nPara criar uma nova senha na GENCO IA, abra o link abaixo (vale por 1 hora):\n${link}\n\nSe você não pediu, ignore este e-mail.`,
+      html: `<p>Olá, ${u.name.split(" ")[0].replace(/[<>&]/g, "")}.</p><p>Para criar uma nova senha na GENCO IA, use o botão abaixo. Ele vale por 1 hora.</p><p><a href="${link}" style="background:#d5001a;color:#fff;padding:10px 18px;border-radius:999px;text-decoration:none;font-weight:600">Criar nova senha</a></p><p style="color:#73757f;font-size:13px">Se você não pediu, ignore este e-mail.</p>` })
+      .catch(e => console.error("[senha]", e.message));
+  }
+  send(res, 200, okMsg);
+});
+router.post("/api/password/reset", async ({ req, res, body }) => {
+  throttle("reset:" + ip(req), 10);
+  const u = one("SELECT * FROM users WHERE reset_token_hash = ? AND kind = 'pessoa'", sec.sha(String(body.token || "")));
+  if (!u || !u.reset_expires || u.reset_expires < now()) throw new HttpError(400, "Link inválido ou expirado. Peça um novo.");
+  if (String(body.senha || "").length < 8) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
+  run("UPDATE users SET password_hash = ?, reset_token_hash = NULL, reset_expires = NULL, invite_token = NULL WHERE id = ?", sec.hashPassword(String(body.senha)), u.id);
+  run("DELETE FROM sessions WHERE user_id = ?", u.id); // derruba sessões antigas
+  send(res, 200, { ok: true }, { "Set-Cookie": sec.sessionCookie(sec.createSession(u.id)) });
+});
+
+// ---------- resumo diário por e-mail ----------
+router.get("/api/digest", async (ctx) => {
+  const { user } = auth(ctx);
+  const p = digest.preview(user);
+  send(ctx.res, 200, { on: !!user.digest_on, hour: user.digest_hour ?? config.digestHour, email: user.email, enabled: smtp.enabled(), subject: p.subject, html: p.html, total: p.total });
+});
+router.put("/api/digest", async (ctx) => {
+  const { user } = auth(ctx);
+  const hour = Math.min(20, Math.max(5, Number(ctx.body.hour) || config.digestHour));
+  run("UPDATE users SET digest_on = ?, digest_hour = ? WHERE id = ?", ctx.body.on ? 1 : 0, hour, user.id);
+  send(ctx.res, 200, { on: !!ctx.body.on, hour });
+});
+router.post("/api/digest/send", async (ctx) => {
+  const { user } = auth(ctx);
+  throttle("digest:" + user.id, 5, 60 * 60e3);
+  if (!smtp.enabled()) throw new HttpError(503, "O envio de e-mails ainda não foi configurado neste servidor (SMTP).");
+  try { await digest.sendTo(user, { force: true }); } catch (e) { throw new HttpError(502, "Não consegui enviar: " + e.message); }
+  send(ctx.res, 200, { ok: true, email: user.email });
 });
 
 // ---------- estado do app ----------
@@ -536,6 +587,8 @@ if (require.main === module) {
   setInterval(() => tick().catch(e => console.error("[agendador]", e.message)), Math.max(1, config.syncMinutes) * 60e3);
   const safeBackup = () => { try { backup(); } catch (e) { console.error("[backup]", e.message); } };
   setTimeout(safeBackup, 60e3); setInterval(safeBackup, 60 * 60e3);
+  // Resumo diário: confere a cada 10 minutos quem já deve receber hoje.
+  setInterval(() => digest.runDue().then(n => n && console.log(`[resumo] ${n} enviado(s)`)).catch(e => console.error("[resumo]", e.message)), 10 * 60e3);
   // Desligamento limpo a cada nova versão publicada (o Render envia SIGTERM).
   const stop = () => { server.close(); try { require("./db").db.close(); } catch {} process.exit(0); };
   process.on("SIGTERM", stop); process.on("SIGINT", stop);

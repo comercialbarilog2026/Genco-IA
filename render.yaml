@@ -41,6 +41,18 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: SMTP_HOST
+        sync: false          # e-mails do sistema (resumo diário, esqueci a senha); pode ficar em branco no começo
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false          # ex.: GENCO IA <nao-responda@suaempresa.com.br>
+      - key: DIGEST_HOUR
+        value: "8"
       - key: SYNC_MINUTES
         value: "15"
       - key: TRIAL_DAYS
