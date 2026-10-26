@@ -316,13 +316,14 @@
   $("input").addEventListener("input", grow);
 
   // Ponte para a tela Grupos (grupos.js).
-  window.Genco = { api, toast, esc, ago, initials, md, get S() { return S; }, refresh, show,
+  window.Genco = { api, toast, esc, ago, initials, md, get S() { return S; }, refresh, show, ask: t => send(t),
     openChat: async id => { box = id; await refresh(); show("conversa"); } };
 
   const q = new URLSearchParams(location.search);
   if (q.get("grupo")) view = "grupos";
   const notes = { ok: "E-mail conectado. Lendo a caixa…", cancelada: "Conexão cancelada.", expirada: "O pedido de conexão expirou. Tente de novo.", erro: "Não foi possível conectar o e-mail. Tente de novo." };
   refresh().then(() => {
+    if (!q.get("grupo") && !q.get("conexao") && S.groups.length && view === "conversa" && !S.chat.length) show("grupos");
     if (q.get("conexao")) { toast(notes[q.get("conexao")] || ""); if (q.get("conexao") === "ok") setTimeout(refresh, 5000); }
     if (q.get("assinatura") === "ok") toast("Assinatura confirmada. Obrigado!");
     if (q.toString()) history.replaceState(null, "", "/app");

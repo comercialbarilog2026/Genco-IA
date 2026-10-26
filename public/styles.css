@@ -319,3 +319,43 @@ details.adv[open]{display:grid;gap:10px}
   .qdetail{padding-left:16px}
   .mrow{grid-template-columns:1fr}
 }
+
+/* ===== pendências do grupo: avisos da IA ===== */
+#grupos.page{max-width:760px;gap:0}
+.brief{padding-block:12px 26px;display:grid;gap:10px}
+.btools{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-bottom:6px}
+.brief-h{font-family:var(--body);font-weight:500;font-size:clamp(25px,4vw,34px);line-height:1.22;letter-spacing:-.015em;margin:0;text-wrap:balance}
+.brief-h em{font-style:normal;color:var(--brand)}
+.avisos{display:grid;gap:30px}
+.aviso{display:grid;gap:12px}
+.aviso-msg{display:grid;grid-template-columns:10px minmax(0,1fr);gap:12px;align-items:start}
+.aviso-msg i{width:9px;height:9px;margin-top:9px;background:var(--ink-2)}
+.aviso-msg p{margin:0;font-size:17px;line-height:1.5;color:var(--ink-2)}
+.aviso-msg p b{color:var(--ink);font-weight:600}
+.aviso.crit .aviso-msg i{background:var(--crit)}
+.aviso.warn .aviso-msg i{background:var(--warn)}
+.aviso.good .aviso-msg i{background:var(--good)}
+.aviso.quiet .aviso-msg i{background:var(--low)}
+.pcards{display:grid;gap:10px;padding-left:22px}
+.pcard{background:var(--surface);border:1px solid var(--hair);border-radius:14px;padding:14px 16px;display:grid;gap:4px;min-width:0}
+.pcard.done{opacity:.7}
+.pc-top{display:flex;gap:10px;align-items:center;min-width:0}
+.pc-top .pdot{margin-top:0;flex:none}
+.pc-top b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:15px}
+.pc-top time{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.pc-top time.late{color:var(--brand);font-weight:500}
+.pc-subj{font-size:14.5px;color:var(--ink-2);padding-left:19px;overflow-wrap:anywhere}
+.pc-do{font-size:13.5px;color:var(--muted);padding-left:19px}
+.pc-do b{color:var(--ink-2);font-weight:600}
+.pc-act{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 0 0 19px}
+.passsel{border:1px solid var(--hair);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;color:var(--ink-2);max-width:100%}
+.linkbtn{border:0;background:transparent;color:var(--ink-2);font-size:13px;padding:4px 6px;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--hair)}
+.linkbtn:hover{color:var(--ink);text-decoration-color:currentColor}
+.linkbtn.more{justify-self:start;margin-left:16px}
+.pc-detail{display:grid;gap:12px;padding:12px 0 2px 19px;min-width:0}
+.mailbody{white-space:pre-wrap;font-family:var(--body);font-size:13.5px;line-height:1.55;margin:0;background:var(--sunk);border-radius:10px;padding:10px 12px;overflow-wrap:anywhere;color:var(--ink-2)}
+.calm{margin:0;color:var(--muted);font-size:14.5px;padding-left:22px}
+.askbox{position:sticky;bottom:12px;margin-top:34px;display:flex;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--hair);border-radius:22px;padding:8px 8px 8px 18px;box-shadow:var(--shadow)}
+.askbox:focus-within{border-color:var(--ink-2)}
+.askbox input{flex:1;min-width:0;border:0;background:transparent;outline:none;padding:6px 0}
+@media (max-width:560px){.pcards,.calm{padding-left:0}.aviso-msg p{font-size:16px}.pc-subj,.pc-do,.pc-act,.pc-detail{padding-left:0}}

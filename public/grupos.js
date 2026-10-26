@@ -1,13 +1,13 @@
-// GENCO IA — tela "Grupos": gestão da caixa compartilhada (fila, donos, situação, notas e configuração).
+// GENCO IA — tela "Pendências" do grupo: a IA avisa, em frases, o que está pendente na caixa compartilhada
+// e cada aviso já traz as ações (assumir, passar, resolver). Configuração do grupo fica em "Configurar".
 (() => {
   const G = () => window.Genco;
   const $ = id => document.getElementById(id);
   const PRI = ["urgente", "alta", "normal", "baixa"];
   const PRI_ORD = { urgente: 0, alta: 1, normal: 2, baixa: 3 };
-  const FILTERS = [["abertos", "Em aberto"], ["meus", "Meus"], ["semdono", "Sem dono"], ["atrasados", "Atrasados"], ["resolvidos", "Resolvidos"], ["todos", "Todos"]];
-
+  
   const initialGroup = Number(new URLSearchParams(location.search).get("grupo")) || null;
-  let current = initialGroup, D = null, filter = "abertos", owner = "", openId = null, configOpen = false, people = null, busy = false;
+  let current = initialGroup, D = null, openId = null, configOpen = false, people = null, busy = false;
 
   const hrs = m => (Date.now() - m.received_at) / 36e5;
   const isOpen = m => m.handling.status !== "resolvido" && !(m.replied && m.handling.status === "novo");
@@ -19,9 +19,9 @@
     const { S, esc } = G();
     if (!S.groups.length) return renderEmpty();
     if (!current || !S.groups.some(g => g.id === current)) current = S.groups[0].id;
-    if (!D || D.group.id !== current) page().innerHTML = `<h2>Grupos</h2><div class="panel"><p class="muted">Carregando…</p></div>`;
+    if (!D || D.group.id !== current) page().innerHTML = `<div class="brief"><span class="cap">GENCO IA</span><h2 class="brief-h">Vendo o que está pendente no grupo…</h2></div>`;
     try { D = await G().api("GET", "/api/groups/" + current); }
-    catch (e) { page().innerHTML = `<h2>Grupos</h2><div class="panel"><p class="err">${esc(e.message)}</p></div>`; return; }
+    catch (e) { page().innerHTML = `<div class="brief"><h2 class="brief-h">Não consegui abrir o grupo.</h2><p class="err">${esc(e.message)}</p></div>`; return; }
     draw();
   }
 
@@ -50,99 +50,119 @@
     };
   }
 
-  // ---------- tela do grupo ----------
+  // ---------- tela do grupo: a IA avisa o que está pendente ----------
+  const firstName = n => String(n || "").split(" ")[0];
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+  const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"; };
+  const byPriority = (a, b) => (PRI_ORD[a.triage?.prioridade] ?? 9) - (PRI_ORD[b.triage?.prioridade] ?? 9) || a.received_at - b.received_at;
+  let showAll = false;
+
+  // Separa a caixa do grupo em avisos, do mais importante para o menos.
+  function buckets() {
+    const me = G().S.me.id;
+    const open = D.inbox.filter(isOpen);
+    const needsOwner = open.filter(m => !m.handling.assignee_id && m.triage?.prioridade !== "baixa").sort(byPriority);
+    const mine = open.filter(m => m.handling.assignee_id === me && m.handling.status !== "aguardando").sort((a, b) => (isLate(b) - isLate(a)) || byPriority(a, b));
+    const teamLate = open.filter(m => m.handling.assignee_id && m.handling.assignee_id !== me && isLate(m) && m.handling.status !== "aguardando").sort(byPriority);
+    const waiting = open.filter(m => m.handling.status === "aguardando");
+    const used = new Set([...needsOwner, ...mine, ...teamLate, ...waiting].map(m => m.id));
+    const rest = D.inbox.filter(m => !used.has(m.id));
+    return { open, needsOwner, mine, teamLate, waiting, rest };
+  }
+
   function draw() {
-    const { S, esc } = G(), o = D.overview, acc = D.account;
-    const tabs = S.groups.length > 1 || D.canManage
-      ? `<div class="gtabs" role="tablist">${S.groups.map(g => `<button type="button" role="tab" data-g="${g.id}" aria-selected="${g.id === current}">${esc(g.name)}</button>`).join("")}${D.canManage ? `<button type="button" class="gadd" data-newgroup>+ Novo grupo</button>` : ""}</div>` : "";
-    const conn = acc
-      ? `<span class="chip">${acc.provider === "demo" ? "demonstração" : esc(acc.provider === "gmail" ? "Gmail" : "Outlook") + " · " + esc(acc.address || "")}</span>${acc.error ? ` <span class="err small">${esc(acc.error)}</span>` : ""}`
-      : `<span class="chip warn">e-mail não conectado</span>`;
-    page().innerHTML = `${tabs}
-      <div class="ghead"><div><h2>${esc(D.group.name)}</h2><p class="small muted">${D.group.address ? esc(D.group.address) + " · " : ""}${conn}${acc?.lastSync ? ` · lido ${esc(G().ago({ received_at: acc.lastSync }))} atrás` : ""}</p></div>
-        <div class="actions">${acc ? `<button type="button" class="btn ghost" id="gSync">Ler agora</button><button type="button" class="btn ghost" id="gChat">Perguntar à IA</button>` : ""}${D.canManage ? `<button type="button" class="btn ghost" id="gCfg" aria-expanded="${configOpen}">Configurar</button>` : ""}</div></div>
+    const { S, esc } = G(), acc = D.account;
+    const switcher = S.groups.length > 1 ? `<select id="gSwitch" class="pillsel" aria-label="Grupo">${S.groups.map(g => `<option value="${g.id}" ${g.id === current ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>` : "";
+    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button><button type="button" class="txtbtn" data-newgroup>Novo grupo</button>` : ""}</div>`;
+    const cap = `<span class="cap">Grupo ${esc(D.group.name)}${D.group.address ? " · " + esc(D.group.address) : ""}</span>`;
+
+    if (!acc) {
+      page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">O e-mail do grupo ainda não está conectado.</h2>
+        <p class="lead">${D.canManage ? "Abra <b>Configurar</b>, escolha quem faz parte do grupo e conecte o e-mail. Depois disso eu aviso aqui tudo o que estiver pendente." : "Peça ao administrador ou gestor para conectar o e-mail do grupo."}</p></div><div id="gCfgBox"></div>`;
+      wire(); if (configOpen && D.canManage) drawConfig();
+      return;
+    }
+
+    const b = buckets(), me = S.me;
+    const total = b.needsOwner.length + b.mine.length + b.teamLate.length;
+    const headline = total
+      ? `${greeting()}, ${esc(firstName(me.name))}. <em>${plural(total, "coisa precisa", "coisas precisam")} de atenção</em> no ${esc(D.group.name)}.`
+      : `${greeting()}, ${esc(firstName(me.name))}. Está tudo em dia no ${esc(D.group.name)}.`;
+
+    const sections = [];
+    if (b.needsOwner.length) {
+      const urg = b.needsOwner.filter(m => m.triage?.prioridade === "urgente").length;
+      sections.push(aviso("crit", `<b>${plural(b.needsOwner.length, "e-mail está", "e-mails estão")} sem ninguém cuidando${urg ? `, ${urg === b.needsOwner.length ? (urg === 1 ? "e é urgente" : "todos urgentes") : `${urg} urgente${urg > 1 ? "s" : ""}`}` : ""}.</b> Alguém precisa assumir.`, b.needsOwner, "semdono"));
+    }
+    if (b.mine.length) {
+      const late = b.mine.filter(isLate).length;
+      sections.push(aviso(late ? "warn" : "ink", `<b>Com você: ${plural(b.mine.length, "e-mail", "e-mails")}.</b> ${late ? `${plural(late, "está atrasado", "estão atrasados")} — o cliente está esperando.` : "Todos dentro do prazo."}`, b.mine, "meus"));
+    } else if (D.isMember) {
+      sections.push(aviso("good", `<b>Nada pendente com você.</b>`, [], "meus"));
+    }
+    if (b.teamLate.length) {
+      const per = {};
+      b.teamLate.forEach(m => { per[m.handling.assignee] = (per[m.handling.assignee] || 0) + 1; });
+      const who = Object.entries(per).sort((x, y) => y[1] - x[1]).map(([n, k]) => `${esc(firstName(n))} com ${k}`).join(", ");
+      sections.push(aviso("warn", `<b>${plural(b.teamLate.length, "e-mail atrasado", "e-mails atrasados")} com a equipe</b> (sem resposta há mais de ${esc(D.atraso)} h): ${who}.`, b.teamLate, "equipe", !D.canManage));
+    }
+    if (b.waiting.length) sections.push(aviso("quiet", `<b>${plural(b.waiting.length, "e-mail aguardando", "e-mails aguardando")} retorno de terceiros.</b>`, b.waiting, "aguardando", true));
+
+    const restOpen = b.rest.filter(isOpen).length, done = b.rest.length - restOpen;
+    const calm = `<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail está", "outros e-mails estão")} com a equipe dentro do prazo` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
+      ${showAll ? `<div class="pcards">${b.rest.sort((x, y) => y.received_at - x.received_at).map(card).join("")}</div>` : ""}`;
+
+    page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${headline}</h2></div>
       <div id="gCfgBox"></div>
-      ${acc ? `<div class="panel gstats">
-          ${[["Em aberto", o.abertos, ""], ["Sem dono", o.semDono, o.semDono ? "hot" : ""], ["Atrasados", o.atrasados, o.atrasados ? "hot" : ""], ["Urgentes", o.urgentes, o.urgentes ? "crit" : ""], ["Resolvidos (7 dias)", o.resolvidos7d, "good"]]
-            .map(([l, n, c]) => `<div class="${c}"><b>${n}</b><span class="cap">${l}</span></div>`).join("")}
-        </div>
-        <div class="glayout"><div class="gqueue">
-          <div class="gfilters"><div class="seg2" role="group" aria-label="Filtro">${FILTERS.map(([k, l]) => `<button type="button" data-f="${k}" aria-pressed="${filter === k}">${l}<span>${count(k)}</span></button>`).join("")}</div>
-            <select id="gOwner" class="pillsel" aria-label="Filtrar por dono"><option value="">Todos os donos</option>${D.members.map(m => `<option value="${m.id}" ${String(m.id) === owner ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></div>
-          <div class="qlist" id="qlist">${rows()}</div></div>
-          <aside class="gside">${loadPanel()}${membersPanel()}</aside></div>`
-      : `<div class="panel"><p>${D.canManage ? "Conecte o e-mail que recebe as mensagens do grupo em <b>Configurar</b>." : "O e-mail deste grupo ainda não foi conectado. Fale com o administrador ou gestor."}</p></div>`}`;
+      <div class="avisos">${sections.join("")}${calm}</div>
+      <form class="askbox" id="gAsk"><input id="gAskIn" placeholder="Pergunte à GENCO IA sobre o grupo — ex.: o que a Ana tem de urgente?" aria-label="Pergunta sobre o grupo"><button type="submit" class="send" aria-label="Perguntar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></form>`;
     wire();
     if (configOpen && D.canManage) drawConfig();
   }
 
-  function list(k = filter) {
-    const me = G().S.me.id;
-    let l = D.inbox.filter(m => ({
-      abertos: isOpen(m), meus: isOpen(m) && m.handling.assignee_id === me, semdono: isOpen(m) && !m.handling.assignee_id && m.triage?.prioridade !== "baixa",
-      atrasados: isLate(m), resolvidos: !isOpen(m), todos: true }[k]));
-    if (owner && k !== "meus") l = l.filter(m => String(m.handling.assignee_id) === owner);
-    if (k !== "resolvidos" && k !== "todos") l.sort((a, b) => (isLate(b) - isLate(a)) || (PRI_ORD[a.triage?.prioridade] ?? 9) - (PRI_ORD[b.triage?.prioridade] ?? 9) || a.received_at - b.received_at);
-    return l;
+  const collapsed = new Set(["equipe:closed-default", "aguardando:closed-default"]);
+  const openSections = new Set();
+  function aviso(tone, text, items, key, startClosed = false) {
+    const isClosed = startClosed && !openSections.has(key);
+    return `<section class="aviso ${tone}"><div class="aviso-msg"><i></i><p>${text}</p></div>
+      ${items.length ? (isClosed ? `<button type="button" class="linkbtn more" data-open="${key}">Mostrar ${plural(items.length, "e-mail", "e-mails")}</button>` : `<div class="pcards">${items.map(card).join("")}</div>`) : ""}</section>`;
   }
-  const count = k => list(k).length;
 
-  function rows() {
-    const { esc, ago, initials } = G();
-    const l = list();
-    if (!l.length) return `<div class="qempty">${{ semdono: "Nenhum e-mail sem dono. Tudo tem alguém cuidando.", meus: "Nada com você agora.", atrasados: "Nenhum e-mail atrasado.", resolvidos: "Nenhum e-mail resolvido ainda." }[filter] || "Nada por aqui."}</div>`;
-    return l.map(m => {
-      const t = m.triage || {}, h = m.handling, st = statusOf(m), late = isLate(m);
-      return `<article class="qrow ${openId === m.id ? "open" : ""} ${isOpen(m) ? "" : "done"}" data-id="${esc(m.id)}">
-        <button type="button" class="qmain" data-toggle="${esc(m.id)}" aria-expanded="${openId === m.id}">
-          <span class="pdot ${esc(t.prioridade || "")}" title="${esc(t.prioridade || "não qualificado")}"></span>
-          <span class="qtxt"><span class="qtop"><b>${esc(m.from_name || m.from_addr)}</b><time class="${late ? "late" : ""}">${late ? "sem resposta há " : "há "}${esc(ago(m))}</time></span>
-            <span class="qsubj">${esc(m.subject)}</span>
-            ${t.tarefa || t.motivo ? `<span class="qwhy">${esc(t.tarefa || t.motivo)}</span>` : ""}</span>
-        </button>
-        <div class="qctl">
-          <span class="qowner ${h.assignee ? "" : "none"}">${h.assignee ? `<span class="av sm">${esc(initials(h.assignee))}</span>${esc(h.assignee)}` : `sem dono${t.responsavel ? `<small>IA sugere ${esc(t.responsavel)}</small>` : ""}`}</span>
-          <span class="st ${esc(st)}">${esc(st === "respondido" ? "Respondido" : D.statuses[st] || st)}</span>
-          ${h.notes ? `<span class="qnotes" title="Notas internas">${h.notes}</span>` : ""}
-        </div>
-        ${openId === m.id ? detail(m) : ""}
-      </article>`;
-    }).join("");
+  function card(m) {
+    const { esc, ago, S } = G(), t = m.triage || {}, h = m.handling, me = S.me.id, late = isLate(m), open = isOpen(m);
+    const mineCard = h.assignee_id === me;
+    const who = h.assignee ? (mineCard ? "com você" : `com ${esc(h.assignee)}`) : (t.responsavel ? `IA sugere ${esc(t.responsavel)}` : "sem dono");
+    const state = !open ? (statusOf(m) === "respondido" ? "respondido" : "resolvido") : h.status === "aguardando" ? "aguardando terceiros" : "";
+    const others = D.members.filter(p => p.id !== h.assignee_id);
+    const btns = [];
+    if (open && !mineCard) btns.push(`<button type="button" class="btn" data-act="assumir">Eu assumo</button>`);
+    if (open && !h.assignee_id && t.responsavel && D.members.some(p => p.name === t.responsavel && p.id !== me)) {
+      const sug = D.members.find(p => p.name === t.responsavel);
+      btns.push(`<button type="button" class="btn ghost" data-pass="${sug.id}">Passar para ${esc(firstName(sug.name))}</button>`);
+    }
+    if (open && mineCard) btns.push(`<button type="button" class="btn" data-act="resolver">Resolvido</button>`, h.status !== "aguardando" ? `<button type="button" class="btn ghost" data-act="aguardar">Aguardando terceiros</button>` : "");
+    if (open && others.length) btns.push(`<select class="passsel" data-passsel aria-label="Passar para"><option value="">Passar para…</option>${others.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select>`);
+    if (!open) btns.push(`<button type="button" class="btn ghost" data-act="reabrir">Reabrir</button>`);
+    btns.push(`<button type="button" class="linkbtn" data-toggle="${esc(m.id)}" aria-expanded="${openId === m.id}">${openId === m.id ? "Fechar" : "Ver e-mail"}${h.notes ? ` · ${plural(h.notes, "nota", "notas")}` : ""}</button>`);
+    return `<article class="pcard ${open ? "" : "done"} ${openId === m.id ? "open" : ""}" data-id="${esc(m.id)}">
+      <div class="pc-top"><span class="pdot ${esc(t.prioridade || "")}" title="${esc(t.prioridade || "")}"></span><b>${esc(m.from_name || m.from_addr)}</b><time class="${late ? "late" : ""}">${late ? "esperando há " : "há "}${esc(ago(m))}</time></div>
+      <div class="pc-subj">${esc(m.subject)}</div>
+      <div class="pc-do">${t.tarefa ? `<b>${esc(t.tarefa)}</b> · ` : ""}<span>${who}</span>${state ? ` · <span>${state}</span>` : ""}${m.draft ? " · resposta pronta" : ""}</div>
+      <div class="pc-act">${btns.join("")}</div>
+      ${openId === m.id ? detail(m) : ""}
+    </article>`;
   }
 
   function detail(m) {
-    const { esc, S } = G(), t = m.triage || {}, h = m.handling, me = S.me.id;
-    const quick = [];
-    if (h.assignee_id !== me && isOpen(m)) quick.push(`<button type="button" class="btn" data-act="assumir">Assumir</button>`);
-    if (isOpen(m)) quick.push(`<button type="button" class="btn ghost" data-act="resolver">Marcar como resolvido</button>`);
-    else quick.push(`<button type="button" class="btn ghost" data-act="reabrir">Reabrir</button>`);
-    return `<div class="qdetail">
-      <div class="qedit">
-        <div class="field"><label for="own-${esc(m.id)}">Dono</label><select id="own-${esc(m.id)}" data-own><option value="">Sem dono</option>${D.members.map(p => `<option value="${p.id}" ${p.id === h.assignee_id ? "selected" : ""}>${esc(p.name)}${p.id === me ? " (você)" : ""}</option>`).join("")}</select></div>
-        <div class="field"><label for="sta-${esc(m.id)}">Situação</label><select id="sta-${esc(m.id)}" data-sta>${Object.entries(D.statuses).map(([k, v]) => `<option value="${k}" ${k === h.status ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></div>
-        <div class="actions qquick">${quick.join("")}</div>
-      </div>
-      ${t.motivo ? `<p class="small"><span class="cap">Leitura da IA</span><br>${esc(t.motivo)}${t.prazo ? ` · prazo ${esc(t.prazo)}` : ""}${t.categoria ? ` · ${esc(t.categoria)}` : ""}</p>` : ""}
+    const { esc } = G(), t = m.triage || {};
+    return `<div class="pc-detail">
+      ${t.motivo ? `<p class="small muted">${esc(t.motivo)}${t.prazo ? ` · prazo ${esc(t.prazo)}` : ""}</p>` : ""}
       ${(t.divergencias || []).length ? `<div class="divg"><span class="cap">Divergências nos documentos</span><ul>${t.divergencias.map(d => `<li>${esc(d)}</li>`).join("")}</ul></div>` : ""}
-      <details class="orig" open><summary>E-mail de ${esc(m.from_addr)}</summary><pre>${esc(m.body)}</pre>${m.attachments.map(a => `<pre class="att">${esc(a.name)}\n\n${esc(a.text || "(conteúdo não lido)")}</pre>`).join("")}</details>
-      ${m.draft ? `<details class="orig"><summary>Rascunho de resposta pronto</summary><pre>${esc(m.draft.assunto)}\n\n${esc(m.draft.corpo)}</pre></details>` : ""}
+      <pre class="mailbody">${esc(m.body)}</pre>${m.attachments.map(a => `<details class="orig"><summary>Anexo ${esc(a.name)}</summary><pre class="att">${esc(a.text || "(conteúdo não lido)")}</pre></details>`).join("")}
+      ${m.draft ? `<details class="orig"><summary>Resposta pronta (rascunho)</summary><pre>${esc(m.draft.assunto)}\n\n${esc(m.draft.corpo)}</pre></details>` : ""}
       <div class="qhist"><span class="cap">Histórico e notas da equipe</span><div id="hist-${esc(m.id)}" class="hist"><p class="small muted">Carregando…</p></div>
-        <form class="noteform" data-note><input placeholder="Escreva uma nota para a equipe (o cliente não vê)" aria-label="Nota interna" maxlength="2000"><button type="submit" class="btn ghost">Anotar</button></form></div>
+        <form class="noteform" data-note><input placeholder="Nota para a equipe (o cliente não vê)" aria-label="Nota interna" maxlength="2000"><button type="submit" class="btn ghost">Anotar</button></form></div>
     </div>`;
-  }
-
-  function loadPanel() {
-    const { esc } = G(), ps = D.overview.pessoas, max = Math.max(1, ...ps.map(p => p.abertos));
-    if (!ps.length) return "";
-    return `<div class="panel"><span class="cap">Carga por pessoa</span>
-      <div class="people">${ps.map(p => `<button type="button" class="person pbtn" data-person="${p.id}" aria-pressed="${String(p.id) === owner}"><span>${esc(p.name)}</span><div class="bar"><i style="width:${Math.round(p.abertos / max * 100)}%"></i></div><b>${p.abertos}</b></button>
-        ${p.atrasados || p.urgentes ? `<div class="psub">${p.urgentes ? `${p.urgentes} urgente${p.urgentes > 1 ? "s" : ""}` : ""}${p.urgentes && p.atrasados ? " · " : ""}${p.atrasados ? `<span class="late">${p.atrasados} atrasado${p.atrasados > 1 ? "s" : ""}</span>` : ""}</div>` : ""}`).join("")}</div>
-      <p class="small muted">Resolvidos nos últimos 7 dias: ${ps.map(p => `${esc(p.name.split(" ")[0])} ${p.resolvidos7d}`).join(" · ")}</p></div>`;
-  }
-  function membersPanel() {
-    const { esc } = G();
-    return `<div class="panel"><span class="cap">Quem cuida do quê</span><dl class="mlist">${D.members.map(m => `<div><dt>${esc(m.name)}${m.coordena ? ' <span class="chip">responsável</span>' : ""}</dt><dd>${esc(m.regra || "Atende e-mails do grupo.")}</dd></div>`).join("") || `<p class="small muted">Nenhum membro ainda.</p>`}</dl>
-      <p class="small muted">${D.group.autoAtribuir ? "A IA define o dono dos e-mails novos pela regra de cada pessoa." : "Os donos são definidos pela equipe."}</p></div>`;
   }
 
   // ---------- configuração (administrador e gestor) ----------
@@ -208,9 +228,10 @@
   }
 
   // ---------- ações ----------
-  async function act(ids, body) {
+  const DONE_MSG = { assumir: "Agora está com você", resolver: "Marcado como resolvido", aguardar: "Marcado como aguardando terceiros", reabrir: "Reaberto", passar: "Passado para a pessoa" };
+  async function act(ids, body, kind) {
     if (busy) return; busy = true;
-    try { const d = await G().api("POST", `/api/groups/${current}/handling`, { ids, ...body }); D.inbox = d.inbox; await reload(true); }
+    try { const d = await G().api("POST", `/api/groups/${current}/handling`, { ids, ...body }); D.inbox = d.inbox; if (openId && ids.includes(openId) && kind !== "passar") openId = null; await reload(true); if (DONE_MSG[kind]) G().toast(DONE_MSG[kind]); }
     catch (e) { G().toast(e.message); }
     busy = false;
   }
@@ -234,27 +255,25 @@
 
   function wire() {
     const root = page();
-    root.querySelectorAll("[data-g]").forEach(b => b.onclick = () => { current = Number(b.dataset.g); owner = ""; openId = null; configOpen = false; render(); });
-    root.querySelector("[data-newgroup]") && (root.querySelector("[data-newgroup]").onclick = () => {
-      $("gCfgBox").innerHTML = createForm(); wireCreate(); $("gNome").focus();
-    });
+    $("gSwitch") && ($("gSwitch").onchange = () => { current = Number($("gSwitch").value); openId = null; configOpen = false; showAll = false; render(); });
+    root.querySelector("[data-newgroup]") && (root.querySelector("[data-newgroup]").onclick = () => { $("gCfgBox").innerHTML = createForm(); wireCreate(); $("gNome").focus(); });
     $("gSync") && ($("gSync").onclick = async () => {
       $("gSync").disabled = true; $("gSync").textContent = "Lendo…";
       try { const d = await G().api("POST", "/api/sync", { grupo: current }); G().toast(d.added ? `${d.added} e-mail${d.added > 1 ? "s" : ""} novo${d.added > 1 ? "s" : ""}` : "Nenhum e-mail novo"); await reload(); }
-      catch (e) { G().toast(e.message); $("gSync").disabled = false; $("gSync").textContent = "Ler agora"; }
+      catch (e) { G().toast(e.message); $("gSync").disabled = false; $("gSync").textContent = "Atualizar"; }
     });
-    $("gChat") && ($("gChat").onclick = () => G().openChat(current));
     $("gCfg") && ($("gCfg").onclick = () => { configOpen = !configOpen; draw(); if (configOpen) $("gCfgBox").scrollIntoView({ behavior: "smooth", block: "start" }); });
-    root.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { filter = b.dataset.f; openId = null; draw(); });
-    $("gOwner") && ($("gOwner").onchange = () => { owner = $("gOwner").value; draw(); });
-    root.querySelectorAll("[data-person]").forEach(b => b.onclick = () => { owner = owner === b.dataset.person ? "" : b.dataset.person; if (filter === "meus") filter = "abertos"; draw(); });
+    $("gAll") && ($("gAll").onclick = () => { showAll = !showAll; draw(); });
+    root.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openSections.add(b.dataset.open); draw(); });
+    $("gAsk") && ($("gAsk").onsubmit = async ev => { ev.preventDefault(); const t = $("gAskIn").value.trim(); if (!t) return; await G().openChat(current); G().ask(t); });
     root.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { openId = openId === b.dataset.toggle ? null : b.dataset.toggle; draw(); });
-    root.querySelectorAll(".qrow.open").forEach(row => {
-      const id = row.dataset.id;
-      row.querySelector("[data-own]").onchange = e => act([id], { dono: e.target.value || null });
-      row.querySelector("[data-sta]").onchange = e => act([id], { situacao: e.target.value });
-      row.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act([id], { assumir: { dono: "eu" }, resolver: { situacao: "resolvido" }, reabrir: { situacao: "andamento" } }[b.dataset.act]));
-      row.querySelector("[data-note]").onsubmit = async ev => {
+    root.querySelectorAll(".pcard").forEach(c => {
+      const id = c.dataset.id;
+      c.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act([id], { assumir: { dono: "eu" }, resolver: { situacao: "resolvido" }, aguardar: { situacao: "aguardando" }, reabrir: { situacao: "andamento" } }[b.dataset.act], b.dataset.act));
+      c.querySelectorAll("[data-pass]").forEach(b => b.onclick = () => act([id], { dono: Number(b.dataset.pass) }, "passar"));
+      const sel = c.querySelector("[data-passsel]"); if (sel) sel.onchange = () => sel.value && act([id], { dono: Number(sel.value) }, "passar");
+      const note = c.querySelector("[data-note]");
+      if (note) note.onsubmit = async ev => {
         ev.preventDefault();
         const inp = ev.target.querySelector("input"), texto = inp.value.trim(); if (!texto) return;
         try {
