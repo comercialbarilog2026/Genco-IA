@@ -194,7 +194,7 @@ router.get("/api/state", async (ctx) => {
     groupLogin: gl,
     me: publicUser(user),
     company: { name: company.name, sector: company.sector, modo: company.modo, people: one("SELECT COUNT(*) AS n FROM users WHERE company_id = ? AND kind = 'pessoa'", company.id).n, sectorName: (SECTORS[company.sector] || SECTORS.geral).nome, access: billing.access(company), seats: billing.seats(company.id), hasSubscription: !!company.stripe_subscription_id },
-    features: { ...config.features, ai: ai.name() },
+    features: { ...config.features, ai: ai.name(), aiReady: ai.ready() },
     account: acc ? { provider: acc.provider, address: acc.address, demoSector: acc.demo_sector, lastSync: acc.last_sync_at, error: acc.last_error } : null,
     myAccount: (a => a ? { provider: a.provider, address: a.address, demoSector: a.demo_sector, lastSync: a.last_sync_at, error: a.last_error } : null)(mail.account(user.id)),
     inbox: mail.inbox(box.id),
@@ -232,7 +232,7 @@ router.post("/api/sync", async (ctx) => {
   const owner = box.group ? boxUser(box.group) : user;
   const r = await mail.sync(box.id, { ai: pdfReader(owner, company) });
   if (r.error) throw new HttpError(502, "Não foi possível ler o e-mail: " + r.error);
-  if (r.added.length && config.autoTriage) await agent.autoTriage(owner, company).catch(e => console.error("[triagem]", e.message));
+  if (config.autoTriage) await agent.autoTriage(owner, company).catch(e => console.error("[triagem]", e.message));
   send(ctx.res, 200, { added: r.added.length, newPeople: r.newPeople || [], inbox: mail.inbox(box.id) });
 });
 
@@ -649,7 +649,7 @@ async function tick() {
     if (!billing.access(company).ok) continue;
     try {
       const s = await mail.sync(user.id, { ai: pdfReader(user, company) });
-      if (s.added.length && config.autoTriage) await agent.autoTriage(user, company);
+      if (config.autoTriage) await agent.autoTriage(user, company); // qualifica novos e os que ficaram pendentes
     } catch (e) { console.error("[agendador]", user.email, e.message); }
   }
 }

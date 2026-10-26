@@ -227,7 +227,7 @@ async function autoTriage(boxUser, company) {
     system: systemPrompt(user, company, rules, inbox, box),
     messages: [{ role: "user", content: "Tarefa automática: qualifique com registrar_qualificacao todos os e-mails marcados como ainda não qualificados, numa única chamada. Não escreva rascunhos. Responda apenas 'ok'." }],
     tools: tools({ user, company, cards: null, box }).filter(t => ["registrar_qualificacao", "ler_caixa"].includes(t.name)),
-    mockState: { inbox, team: rules.team || [] }, maxRounds: 3
+    mockState: { inbox, team: rules.team || [] }, maxRounds: 3, allowFallback: true
   });
   ai.recordUsage({ companyId: company.id, userId: g ? null : user.id, kind: "auto", model: r.model, usage: r.usage });
   return inbox.filter(m => !m.triage).length;

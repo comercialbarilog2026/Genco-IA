@@ -326,6 +326,7 @@
     let msg = "", btn = "";
     if (!a.ok) { msg = a.status === "trial_ended" ? "Seu período de teste terminou. Assine para continuar usando a GENCO IA." : "A assinatura não está ativa."; btn = admin ? `<button type="button" class="btn brand" id="banBuy">Assinar agora</button>` : "<span class='small'>Fale com o administrador da sua empresa.</span>"; }
     else if (a.status === "past_due") { msg = a.warning; btn = admin ? `<button type="button" class="btn ghost" id="banPortal">Atualizar pagamento</button>` : ""; }
+    else if (!S.features.aiReady && ["admin", "gestor"].includes(S.me.role)) { msg = "A IA ainda não está ativada no servidor: os e-mails estão sendo separados por regras simples. Para a IA de verdade, falta colar a ANTHROPIC_API_KEY no Render (Environment)."; }
     else if (a.status === "trialing" && a.daysLeft <= 5) { msg = `Seu teste grátis termina em ${a.daysLeft} dia${a.daysLeft === 1 ? "" : "s"}.`; btn = admin ? `<button type="button" class="btn ghost" id="banBuy">Assinar</button>` : ""; }
     $("banner").hidden = !msg;
     $("bannerIn").innerHTML = msg ? `<span>${esc(msg)}</span>${btn}` : "";

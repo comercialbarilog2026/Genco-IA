@@ -23,9 +23,14 @@ function monthlyCount(userId) {
   return one("SELECT COUNT(*) AS n FROM usage WHERE user_id = ? AND kind = 'chat' AND created_at >= ?", userId, start).n;
 }
 
+const ready = () => { const p = PROVIDERS[config.ai.provider]; return !!p && p.ready(); };
+
 module.exports = {
   name: () => config.ai.provider,
-  async run(opts) { return provider().run(opts); },
+  ready,
+  // fallback: sem chave de IA, a qualificação automática usa regras simples (palavras-chave e função de cada pessoa)
+  // para os e-mails já aparecerem separados; a conversa continua avisando que falta a chave.
+  async run(opts) { if (opts.allowFallback && !ready()) return PROVIDERS.mock.run(opts); return provider().run(opts); },
   async extractPdf(base64, { companyId, userId } = {}) {
     const p = provider();
     const r = await p.extractPdf(base64);
