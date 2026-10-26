@@ -483,6 +483,28 @@ router.get("/api/people", async (ctx) => {
   send(ctx.res, 200, { people: all("SELECT id, name, email FROM users WHERE company_id = ? AND kind = 'pessoa' ORDER BY name", company.id) });
 });
 router.get("/api/groups", async (ctx) => { const { user } = auth(ctx); send(ctx.res, 200, { groups: groups.list(user) }); });
+// O grupo já existe no Gmail/Outlook/provedor: a pessoa só informa o endereço. Cria (ou reaproveita) o grupo
+// no app e, se a caixa conectada na conta dela já é esse endereço, passa essa caixa para o grupo.
+router.post("/api/groups/connect-start", async (ctx) => {
+  const { user, company } = auth(ctx);
+  if (!groups.canManage(user)) throw new HttpError(403, "Só administradores e gestores conectam o e-mail do grupo.");
+  const endereco = String(ctx.body.endereco || "").trim().toLowerCase();
+  if (!EMAIL_RE.test(endereco)) throw new HttpError(400, "Informe o e-mail do grupo (ex.: operacional@suaempresa.com.br).");
+  let g = one("SELECT g.*, u.name FROM groups g JOIN users u ON u.id = g.user_id WHERE g.company_id = ? AND lower(g.address) = ?", company.id, endereco);
+  if (!g) {
+    g = groups.create(company, { nome: groups.nameFromGroupAddress(endereco), endereco });
+    groups.setMembers(g, [{ user_id: user.id, coordena: true, regra: "" }]);
+  }
+  const mine = mail.account(user.id);
+  let adopted = false;
+  if (mine && String(mine.address || "").toLowerCase() === endereco && !mail.account(g.user_id)) {
+    groups.adoptMailbox(user.id, g); adopted = true;
+    if (company.modo !== "equipe") run("UPDATE companies SET modo = 'equipe' WHERE id = ?", company.id);
+    mail.sync(g.user_id).then(() => { const bu = boxUser(g); if (bu && config.autoTriage && billing.access(company).ok) return agent.autoTriage(bu, company); }).catch(e => console.error("[grupo]", e.message));
+  }
+  send(ctx.res, 200, { group: groups.publicGroup(groups.get(company.id, g.user_id)), adopted, connected: !!mail.account(g.user_id) });
+});
+
 router.post("/api/groups", async (ctx) => {
   const { user, company } = auth(ctx);
   if (!groups.canManage(user)) throw new HttpError(403, "Só administradores e gestores criam grupos.");

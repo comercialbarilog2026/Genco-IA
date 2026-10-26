@@ -204,6 +204,17 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     assert.deepEqual(subjects, ["Agendamento", "Contêiner parado - segunda vez", "Obrigada", "Status do embarque"]);
     assert.ok(r.data.inbox.find(m => m.subject === "Agendamento").replied); step("IMAP no grupo: lê só o que foi para operacional@ e reconhece a resposta da equipe");
     assert.ok(r.data.members.some(m => m.email === "rafael.costa@brcomexx.com.br" && m.name === "Rafael Costa" && m.origem === "email")); step("IMAP no grupo: Rafael detectado automaticamente pela resposta dele");
+    // Entrou com a própria caixa do grupo: "Qual é o e-mail do grupo?" usa a caixa já conectada
+    r = await call("imap", "POST", "/api/groups/connect-start", { endereco: "CAIO@brcomexx.com.br" });
+    assert.equal(r.data.adopted, true); assert.equal(r.data.connected, true); assert.equal(r.data.group.name, "Caio");
+    const adoptedId = r.data.group.id;
+    r = await call("imap", "GET", `/api/groups/${adoptedId}`); assert.equal(r.data.inbox.length, 6); assert.ok(r.data.inbox.some(m => m.subject === "Contêiner parado - segunda vez"));
+    r = await call("imap", "GET", "/api/me/box"); assert.equal(r.data.account, null);
+    r = await call("imap", "POST", "/api/groups/connect-start", { endereco: "caio@brcomexx.com.br" }); assert.equal(r.data.group.id, adoptedId); assert.equal(r.data.adopted, false);
+    step("E-mail do grupo: a caixa já conectada vira a caixa do grupo, com tudo o que já foi lido");
+    r = await call("imap", "DELETE", `/api/groups/${adoptedId}`); assert.equal(r.status, 200);
+    await call("imap", "POST", "/api/connect/imap", { ...imapLogin, senha: fake.pass });
+
     // Entrar com a conta do provedor (sem senha da GENCO IA)
     r = await call("sso1", "POST", "/api/auth/imap", { ...imapLogin, senha: "errada" }); assert.equal(r.status, 400);
     r = await call("sso1", "POST", "/api/auth/imap", { ...imapLogin, senha: fake.pass });
@@ -266,7 +277,7 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
 
     console.log("\nTodos os testes passaram.");
   } catch (e) {
-    console.error("\nFalhou:", e.message); process.exitCode = 1;
+    console.error("\nFalhou:", e.message, (e.stack || "").split("\n").find(l => l.includes("e2e.js"))); process.exitCode = 1;
   } finally {
     server.close(); smtpBox?.server.close(); fs.rmSync(dbFile, { force: true }); ["-wal", "-shm"].forEach(s => fs.rmSync(dbFile + s, { force: true }));
     setTimeout(() => process.exit(), 50);

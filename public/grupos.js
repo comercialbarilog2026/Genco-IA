@@ -9,7 +9,7 @@
   // current: id do grupo aberto, ou 0 = "Minha caixa" (pessoa que usa sozinha, com um único e-mail).
   const initialGroup = Number(new URLSearchParams(location.search).get("grupo")) || null;
   const boxUrl = () => current === 0 ? "/api/me/box" : "/api/groups/" + current;
-  let skipEmpty = false;
+  let skipEmpty = false, wantGroup = false;
   let current = initialGroup, D = null, openId = null, configOpen = false, people = null, busy = false;
 
   const hrs = m => (Date.now() - m.received_at) / 36e5;
@@ -22,7 +22,8 @@
     const { S, esc } = G();
     const manage = ["admin", "gestor"].includes(S.me.role);
     // Empresa que se cadastrou como equipe e ainda não tem grupo nem e-mail: começa criando o grupo.
-    if (!S.groups.length && !S.myAccount && manage && S.company.modo === "equipe" && !skipEmpty) return renderEmpty();
+    // Empresa de equipe sem grupo conectado ainda (ou pedido de conectar outro grupo): tela "Qual é o e-mail do grupo?"
+    if (wantGroup || (!S.groups.length && manage && S.company.modo === "equipe" && !skipEmpty)) { wantGroup = false; return renderEmpty(); }
     if (current === null || (current !== 0 && !S.groups.some(g => g.id === current)))
       current = S.groupLogin ? S.groupLogin.id : (S.groups.length && !S.myAccount ? S.groups[0].id : 0);
     // Quem entrou pelo e-mail do grupo abre direto na própria aba.
@@ -37,30 +38,39 @@
   // ---------- sem grupos ----------
   function renderEmpty() {
     const { S } = G(), manage = ["admin", "gestor"].includes(S.me.role);
-    page().innerHTML = `<div class="brief"><span class="cap">Primeiro passo</span><h2 class="brief-h">Vamos criar o e-mail da sua equipe.</h2>
-      <p class="lead">Um grupo é um e-mail atendido por várias pessoas, como operacional@ ou atendimento@. Eu leio o que chega, aviso o que está pendente e separo o que é de cada pessoa.</p></div>
-      ${manage ? createForm() : ""}
-      <p class="calm" style="padding-left:0;margin-top:18px">Vai usar só com o seu e-mail, sem equipe? <button type="button" class="linkbtn" id="gSolo">Conectar só o meu e-mail</button></p>`;
-    if (manage) wireCreate();
+    const f = S.features, mine = S.myAccount?.address && S.myAccount.address.includes("@") ? S.myAccount.address : "";
+    page().innerHTML = `<div class="brief"><span class="cap">E-mail do grupo</span><h2 class="brief-h">Qual é o e-mail do grupo?</h2>
+      <p class="lead">O grupo já existe no seu Gmail, Outlook ou provedor (ex.: operacional@). É só informar o endereço e conectar: eu leio o que chega, encontro quem faz parte e separo o que é de cada pessoa.</p></div>
+      ${manage ? `<div class="panel">
+        <div class="field"><label for="gEnd">E-mail do grupo</label><input id="gEnd" type="email" placeholder="operacional@suaempresa.com.br" value="${G().esc(mine)}"></div>
+        <p class="small muted">Conecte com a conta que recebe os e-mails do grupo: a própria caixa do grupo, ou a de uma pessoa que faz parte dele.</p>
+        <div class="connect">
+          ${mine ? `<button type="button" class="conn" data-gstart="mine"><b>Usar a caixa já conectada</b><span>${G().esc(mine)}</span></button>` : ""}
+          <button type="button" class="conn" data-gstart="gmail" ${f.gmail ? "" : "disabled"}><b>Gmail</b><span>${f.gmail ? "Google Workspace" : "Em breve neste servidor"}</span></button>
+          <button type="button" class="conn" data-gstart="outlook" ${f.outlook ? "" : "disabled"}><b>Outlook</b><span>${f.outlook ? "Microsoft 365" : "Em breve neste servidor"}</span></button>
+          <button type="button" class="conn" data-gstart="imap"><b>Outro provedor</b><span>E-mail e senha (inclui Gmail com senha de app)</span></button>
+        </div><div id="gStartBox"></div><p class="formerr" id="gStartErr" role="alert"></p></div>`
+      : `<div class="panel"><p class="muted">Peça ao administrador da sua empresa para conectar o e-mail do grupo.</p></div>`}
+      <p class="calm" style="padding-left:0;margin-top:18px">Vai usar só com o seu e-mail, sem grupo? <button type="button" class="linkbtn" id="gSolo">Ver só a minha caixa</button></p>`;
     $("gSolo").onclick = () => { skipEmpty = true; current = 0; render(); };
-  }
-  function createForm() {
-    return `<div class="panel" id="gNewPanel"><h3>Criar grupo</h3>
-      <div class="grid2"><div class="field"><label for="gNome">Nome do grupo</label><input id="gNome" placeholder="Operacional"></div>
-        <div class="field"><label for="gEnd">Endereço do grupo</label><input id="gEnd" type="email" placeholder="operacional@suaempresa.com.br"></div></div>
-      <div class="actions"><button type="button" class="btn" id="gCreate">Criar grupo</button></div>
-      <p class="small muted">Depois de criar, você escolhe os membros e conecta o e-mail que recebe as mensagens do grupo.</p></div>`;
-  }
-  function wireCreate() {
-    $("gCreate").onclick = async () => {
-      try {
-        const d = await G().api("POST", "/api/groups", { nome: $("gNome").value, endereco: $("gEnd").value || undefined, membros: [{ user_id: G().S.me.id, coordena: true }] });
-        current = d.group.id; configOpen = true; D = null; await G().refresh();
-        G().toast("Grupo criado. Agora escolha os membros e conecte o e-mail.");
-      } catch (e) { G().toast(e.message); }
+    if (!manage) return;
+    const start = async () => {
+      $("gStartErr").textContent = "";
+      const endereco = $("gEnd").value.trim();
+      const d = await G().api("POST", "/api/groups/connect-start", { endereco });
+      current = d.group.id; D = null; return d;
     };
+    page().querySelectorAll("[data-gstart]").forEach(b => b.onclick = async () => {
+      const how = b.dataset.gstart;
+      try {
+        if (how === "mine") $("gEnd").value = mine;
+        const d = await start();
+        if (d.connected) { G().toast(d.adopted ? "Pronto: a caixa agora é do grupo. Lendo os e-mails…" : "Grupo conectado."); await G().refresh(); return; }
+        if (how === "gmail" || how === "outlook") { location.href = `/api/connect/${how}?grupo=${d.group.id}`; return; }
+        G().imapConnect($("gStartBox"), { grupo: d.group.id, email: $("gEnd").value.trim(), title: "Conectar o e-mail do grupo", onDone: async () => { G().toast("E-mail do grupo conectado. Lendo os e-mails…"); await G().refresh(); } });
+      } catch (e) { $("gStartErr").textContent = e.message; }
+    });
   }
-
   // ---------- tela do grupo: a IA avisa o que está pendente ----------
   const firstName = n => String(n || "").split(" ")[0];
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
@@ -85,7 +95,7 @@
     const { S, esc } = G(), acc = D.account;
     const switcher = S.groups.length ? `<select id="gSwitch" class="pillsel" aria-label="Caixa">${[{ id: 0, name: "Minha caixa" }, ...S.groups].map(g => `<option value="${g.id}" ${g.id === current ? "selected" : ""}>${g.id ? "Grupo " : ""}${esc(g.name)}</option>`).join("")}</select>` : "";
     const manageAny = ["admin", "gestor"].includes(S.me.role);
-    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button>` : ""}${manageAny ? `<button type="button" class="txtbtn" data-newgroup>${S.groups.length ? "Novo grupo" : "Usar com equipe"}</button>` : ""}</div>`;
+    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button>` : ""}${manageAny ? `<button type="button" class="txtbtn" data-newgroup>${S.groups.length ? "Conectar outro grupo" : "Conectar e-mail de grupo"}</button>` : ""}</div>`;
     if (D.personal) return drawPersonal(tools);
     const cap = `<span class="cap">Grupo ${esc(D.group.name)}${D.group.address ? " · " + esc(D.group.address) : ""}</span>`;
 
@@ -440,7 +450,7 @@
   function wire() {
     const root = page();
     $("gSwitch") && ($("gSwitch").onchange = () => { current = Number($("gSwitch").value) || 0; openId = null; person = null; configOpen = false; showAll = false; render(); });
-    root.querySelector("[data-newgroup]") && (root.querySelector("[data-newgroup]").onclick = () => { $("gCfgBox").innerHTML = createForm(); wireCreate(); $("gNome").focus(); });
+    root.querySelector("[data-newgroup]") && (root.querySelector("[data-newgroup]").onclick = () => { wantGroup = true; render(); });
     $("gSync") && ($("gSync").onclick = async () => {
       $("gSync").disabled = true; $("gSync").textContent = "Lendo…";
       try { const d = await G().api("POST", "/api/sync", current ? { grupo: current } : undefined); G().toast(d.added ? `${d.added} e-mail${d.added > 1 ? "s" : ""} novo${d.added > 1 ? "s" : ""}` : "Nenhum e-mail novo"); await reload(); }

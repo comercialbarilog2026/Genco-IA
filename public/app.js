@@ -368,10 +368,10 @@
   $("input").addEventListener("input", grow);
 
   // ---------- "Outro provedor": qualquer e-mail com IMAP (Locaweb, UOL, Hostinger, Titan, Yahoo...) ----------
-  function imapConnect(container, { grupo = null, onDone } = {}) {
+  function imapConnect(container, { grupo = null, onDone, email = "", title = "Conectar outro provedor" } = {}) {
     const id = "im" + Math.random().toString(36).slice(2, 7), el = s => $(id + s);
     container.innerHTML = `<form class="panel imapf" id="${id}">
-      <h3>Conectar outro provedor</h3>
+      <h3>${esc(title)}</h3>
       <p class="small muted">Locaweb, UOL, Hostinger, Titan, Zoho, Yahoo, KingHost, iCloud ou o e-mail do domínio da sua empresa. Digite o e-mail e a senha: eu encontro o servidor sozinho.</p>
       <div class="grid2"><div class="field"><label for="${id}E">E-mail</label><input id="${id}E" type="email" autocomplete="email" required></div>
         <div class="field"><label for="${id}S">Senha do e-mail</label><input id="${id}S" type="password" autocomplete="current-password" required></div></div>
@@ -385,6 +385,7 @@
       <div class="actions"><button type="submit" class="btn" id="${id}B">Conectar</button><button type="button" class="btn ghost" id="${id}C">Cancelar</button></div>
       <p class="small muted">A senha fica guardada criptografada e só é usada para ler os e-mails e salvar as respostas na sua pasta Rascunhos. A GENCO IA nunca envia e-mails.</p>
     </form>`;
+    if (email) { el("E").value = email; setTimeout(() => el("E").dispatchEvent(new Event("change")), 0); }
     el("C").onclick = () => { container.innerHTML = ""; };
     el("E").onchange = async () => {
       const email = el("E").value.trim(); if (!email.includes("@")) return;

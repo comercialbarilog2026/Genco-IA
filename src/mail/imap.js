@@ -23,8 +23,9 @@ async function test(cfg) {
   });
 }
 
-const internalSkip = new Map(); // ids de mensagens da própria equipe já vistas (não relê a cada ciclo)
-const notForGroup = new Set();  // ids que não são do grupo (caixa pessoal de quem conectou)
+// Caches por conta + endereço do grupo (a mesma conta pode alimentar a caixa pessoal e um grupo).
+const skipCache = new Map();
+const skipSet = key => { if (!skipCache.has(key)) skipCache.set(key, new Set()); return skipCache.get(key); };
 
 // Mesmo formato do conector Gmail: { provider_id, thread_id, from_*, subject, body, received_at, replied, attachments }
 async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), internal = null, teamDomain = "", groupAddress = "" } = {}) {
@@ -51,6 +52,7 @@ async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), inte
     const { uidValidity } = await c.select("INBOX");
     const all = (await c.searchSince(since)).slice(-Math.max(max * 3, 60));
     const pid = uid => `imap:${uidValidity}:${uid}`;
+    const notForGroup = skipSet(`${cfg.user}@${cfg.host}|grupo:${groupAddress}`);
     const heads = await c.fetch(all, "UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES DELIVERED-TO X-ORIGINAL-TO LIST-ID DATE)]");
     heads.sort((a, b) => b.uid - a.uid);
     const teamSeen = new Map();
@@ -59,7 +61,7 @@ async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), inte
       const id = pid(f.uid), h = mime.parse(f.body || Buffer.alloc(0));
       const answered = f.flags.includes("\\answered") || answeredIds.has(h.messageId);
       if (knownIds.has(id)) { out.push({ provider_id: id, known: true, lastSent: answered ? Date.now() : 0 }); continue; }
-      if (notForGroup.has(id)) continue;
+      if (groupAddress && notForGroup.has(id)) continue;
       // Grupo lido pela conta de um dos membros: só o que foi enviado para o endereço do grupo.
       if (groupAddress) {
         const g = groupAddress.toLowerCase();
@@ -72,7 +74,7 @@ async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), inte
       if (internal && (internal.has(fromAddr) || isTeamReply)) {
         // resposta de alguém da equipe: marca a conversa como respondida
         if (h.inReplyTo) answeredIds.add(h.inReplyTo); h.references.forEach(r => answeredIds.add(r));
-        internalSkip.set(id, true); continue;
+        continue;
       }
       if (toRead.length < max) toRead.push({ f, h, id });
     }

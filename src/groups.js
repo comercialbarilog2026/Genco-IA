@@ -197,6 +197,17 @@ function overview(g, inbox, isLate) {
   };
 }
 
+// A caixa conectada na conta da pessoa é, na verdade, o e-mail do grupo (ex.: entrou com operacional@):
+// passa a caixa inteira (conexão, e-mails lidos, qualificações, rascunhos) para o grupo.
+function adoptMailbox(fromUserId, g) {
+  run("DELETE FROM mail_accounts WHERE user_id = ?", g.user_id);
+  ["messages", "triage", "drafts"].forEach(t => { run(`DELETE FROM ${t} WHERE user_id = ?`, g.user_id); run(`UPDATE ${t} SET user_id = ? WHERE user_id = ?`, g.user_id, fromUserId); });
+  ["handling", "events"].forEach(t => { run(`DELETE FROM ${t} WHERE box_id = ?`, g.user_id); run(`UPDATE ${t} SET box_id = ? WHERE box_id = ?`, g.user_id, fromUserId); });
+  run("UPDATE mail_accounts SET user_id = ? WHERE user_id = ?", g.user_id, fromUserId);
+}
+// "operacional@empresa.com.br" -> "Operacional"
+const nameFromGroupAddress = a => { const l = String(a).split("@")[0].replace(/[._-]+/g, " ").trim(); return l ? l[0].toUpperCase() + l.slice(1) : "Grupo"; };
+
 // Funções mudaram: os e-mails ainda sem dono voltam para a fila de qualificação da IA.
 function requalifyUnassigned(g) {
   run(`DELETE FROM triage WHERE user_id = ? AND message_id IN (
@@ -204,5 +215,5 @@ function requalifyUnassigned(g) {
          WHERE m.user_id = ? AND h.assignee_id IS NULL AND m.replied = 0 AND COALESCE(h.status, 'novo') = 'novo')`, g.user_id, g.user_id);
 }
 
-module.exports = { requalifyUnassigned, STATUS, OPEN, get, byBox, list, publicGroup, addDetected, setPassword, byAddress, nameFromEmail, create, update, remove, members, setMembers, rulesFor, canSee, canManage, isMember,
+module.exports = { adoptMailbox, nameFromGroupAddress, requalifyUnassigned, STATUS, OPEN, get, byBox, list, publicGroup, addDetected, setPassword, byAddress, nameFromEmail, create, update, remove, members, setMembers, rulesFor, canSee, canManage, isMember,
   handlingOf, setHandling, addNote, history, autoAssign, overview, effective, isOpen };
