@@ -276,10 +276,26 @@ function loginOrSignup({ email, name, provider, tokens }) {
   let u = one("SELECT * FROM users WHERE email = ? AND kind = 'pessoa'", email), isNew = false;
   if (!u) {
     const nome = String(name || "").trim() || email.split("@")[0];
-    const empresa = companyNameFor(email, nome);
-    const c = run("INSERT INTO companies (name, sector, modo, status, trial_ends_at, rules_json, created_at) VALUES (?, 'geral', 'individual', 'trialing', ?, ?, ?)",
-      empresa, now() + config.trialDays * 864e5, JSON.stringify(defaultRules("geral", empresa)), now());
-    const r = run("INSERT INTO users (company_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, NULL, 'admin', ?)", c.lastInsertRowid, nome, email, now());
+    // E-mail da empresa (joao@brcomexx, carol@brcomexx...): entra na mesma empresa de quem já usa
+    // esse domínio. O provedor confirmou que a pessoa é dona do e-mail, então o domínio basta.
+    const domain = email.split("@")[1];
+    const mate = FREE_DOMAINS.test(domain) ? null
+      : one("SELECT company_id FROM users WHERE kind = 'pessoa' AND substr(email, instr(email, '@') + 1) = ? ORDER BY id LIMIT 1", domain);
+    let companyId, role = "admin";
+    if (mate) {
+      companyId = mate.company_id; role = "membro";
+      const co = one("SELECT * FROM companies WHERE id = ?", companyId);
+      const rules = json(co.rules_json, {});
+      if (Array.isArray(rules.team) && !rules.team.some(t => String(t.nome).toLowerCase() === nome.toLowerCase())) {
+        rules.team.push({ nome, regra: "" });
+        run("UPDATE companies SET rules_json = ? WHERE id = ?", JSON.stringify(rules), companyId);
+      }
+    } else {
+      const empresa = companyNameFor(email, nome);
+      companyId = Number(run("INSERT INTO companies (name, sector, modo, status, trial_ends_at, rules_json, created_at) VALUES (?, 'geral', 'individual', 'trialing', ?, ?, ?)",
+        empresa, now() + config.trialDays * 864e5, JSON.stringify(defaultRules("geral", empresa)), now()).lastInsertRowid);
+    }
+    const r = run("INSERT INTO users (company_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, NULL, ?, ?)", companyId, nome, email, role, now());
     u = one("SELECT * FROM users WHERE id = ?", Number(r.lastInsertRowid)); isNew = true;
   } else if (u.invite_token) run("UPDATE users SET invite_token = NULL WHERE id = ?", u.id); // convite aceito ao entrar
   if (tokens) mail.saveOrRefresh(u.id, provider, tokens);

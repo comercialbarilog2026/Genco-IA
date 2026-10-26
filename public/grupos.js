@@ -23,7 +23,8 @@
     const manage = ["admin", "gestor"].includes(S.me.role);
     // Empresa que se cadastrou como equipe e ainda não tem grupo nem e-mail: começa criando o grupo.
     // Empresa de equipe sem grupo conectado ainda (ou pedido de conectar outro grupo): tela "Qual é o e-mail do grupo?"
-    if (wantGroup || (!S.groups.length && manage && S.company.modo === "equipe" && !skipEmpty)) { wantGroup = false; return renderEmpty(); }
+    // Login comum: cada pessoa abre na própria caixa. Grupo só quando alguém pede (Configurações).
+    if (wantGroup) { wantGroup = false; return renderEmpty(); }
     if (current === null || (current !== 0 && !S.groups.some(g => g.id === current)))
       current = S.groupLogin ? S.groupLogin.id : (S.groups.length && !S.myAccount ? S.groups[0].id : 0);
     // Quem entrou pelo e-mail do grupo abre direto na própria aba.
@@ -51,7 +52,7 @@
           <button type="button" class="conn" data-gstart="imap"><b>Outro provedor</b><span>E-mail e senha (inclui Gmail com senha de app)</span></button>
         </div><div id="gStartBox"></div><p class="formerr" id="gStartErr" role="alert"></p></div>`
       : `<div class="panel"><p class="muted">Peça ao administrador da sua empresa para conectar o e-mail do grupo.</p></div>`}
-      <p class="calm" style="padding-left:0;margin-top:18px">Vai usar só com o seu e-mail, sem grupo? <button type="button" class="linkbtn" id="gSolo">Ver só a minha caixa</button></p>`;
+      <p class="calm" style="padding-left:0;margin-top:18px"><button type="button" class="linkbtn" id="gSolo">Voltar para a minha caixa</button></p>`;
     $("gSolo").onclick = () => { skipEmpty = true; current = 0; render(); };
     if (!manage) return;
     const start = async () => {
@@ -95,7 +96,7 @@
     const { S, esc } = G(), acc = D.account;
     const switcher = S.groups.length ? `<select id="gSwitch" class="pillsel" aria-label="Caixa">${[{ id: 0, name: "Minha caixa" }, ...S.groups].map(g => `<option value="${g.id}" ${g.id === current ? "selected" : ""}>${g.id ? "Grupo " : ""}${esc(g.name)}</option>`).join("")}</select>` : "";
     const manageAny = ["admin", "gestor"].includes(S.me.role);
-    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button>` : ""}${manageAny ? `<button type="button" class="txtbtn" data-newgroup>${S.groups.length ? "Conectar outro grupo" : "Conectar e-mail de grupo"}</button>` : ""}</div>`;
+    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button>` : ""}${manageAny && S.groups.length ? `<button type="button" class="txtbtn" data-newgroup>Conectar outro grupo</button>` : ""}</div>`;
     if (D.personal) return drawPersonal(tools);
     const cap = `<span class="cap">Grupo ${esc(D.group.name)}${D.group.address ? " · " + esc(D.group.address) : ""}</span>`;
 
@@ -482,5 +483,5 @@
     if (openId && !D.personal) loadHistory(openId);
   }
 
-  window.GencoGrupos = { render };
+  window.GencoGrupos = { render, newGroup: () => { wantGroup = true; G().show("grupos"); } };
 })();

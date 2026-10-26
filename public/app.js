@@ -214,6 +214,9 @@
         : `<p class="muted">Nenhum e-mail conectado.</p><div class="actions"><button type="button" class="btn" id="cSwap">Conectar e-mail</button></div>`}
       </div>
       ${window.GencoPWA && !window.GencoPWA.installed ? `<div class="panel" id="installPanel"></div>` : ""}
+      ${canRules() ? `<div class="panel"><h3>E-mail de grupo <span class="muted small">(opcional)</span></h3>
+        <p class="small muted">Cada pessoa entra com o próprio e-mail e a equipe se forma sozinha pelo domínio da empresa. Se vocês também usam uma caixa compartilhada (ex.: operacional@), dá para conectar aqui.</p>
+        <div class="actions"><button type="button" class="btn ghost" id="cGroup">${S.groups.length ? "Conectar outro e-mail de grupo" : "Conectar e-mail de grupo"}</button></div></div>` : ""}
       <div class="panel" id="digestPanel"><h3>Resumo diário por e-mail</h3><p class="muted small">Carregando…</p></div>
       <div class="panel"><h3>Equipe e regras</h3>
         <p class="small muted">A GENCO IA usa estas regras para qualificar e indicar o responsável de cada e-mail. ${canRules() ? "Você também pode mudar conversando com ela." : "Só administradores e gestores podem alterar."}</p>
@@ -236,6 +239,7 @@
         <p class="small muted">Uso neste mês: ${S.usage.month} de ${S.usage.limit} mensagens para a IA.</p></div>` : ""}`;
 
     loadDigest(); renderInstall();
+    $("cGroup") && ($("cGroup").onclick = () => window.GencoGrupos.newGroup());
     const ro = !canRules();
     $("config").querySelectorAll("#teamRows input, #cCoord, #cAtraso, #cUrg, #cTom").forEach(el => el.disabled = ro);
     $("cSwap") && ($("cSwap").onclick = async () => { box = null; await refresh(); S.account = null; S.chat = []; show("conversa"); renderChat(); });

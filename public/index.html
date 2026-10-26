@@ -30,7 +30,7 @@
     <section class="pitch">
       <span class="cap">Assistente de e-mails para você ou sua equipe</span>
       <h2>Saiba o que responder primeiro. <em>Todos os dias.</em></h2>
-      <p>A GENCO IA lê o seu e-mail, ou o e-mail de grupo da sua equipe, avisa o que está pendente, indica quem deve cuidar de cada um e deixa as respostas prontas no próprio e-mail. Serve para quem trabalha sozinho e para equipes.</p>
+      <p>Cada pessoa entra com o próprio e-mail (Google, Microsoft ou qualquer provedor). A GENCO IA lê a caixa, avisa o que está pendente e deixa as respostas prontas no próprio e-mail. Colegas com o mesmo domínio da empresa formam a equipe sozinhos, e o gestor vê as pendências de cada um.</p>
       <ul class="points">
         <li><i></i><div><b>Qualificação automática.</b> <span>Urgente, alta, normal ou baixa, com o motivo, pelos critérios da sua empresa.</span></div></li>
         <li><i></i><div><b>Nada fica parado.</b> <span>E-mails sem resposta além do prazo aparecem antes que o cliente cobre.</span></div></li>
@@ -71,10 +71,6 @@
           <option value="comex">Comércio exterior / despacho aduaneiro</option>
           <option value="distribuicao">Distribuição e atacado</option>
         </select></div>
-        <fieldset class="field modo"><legend>Quem vai usar a GENCO IA?</legend>
-          <label class="check"><input type="radio" name="sModo" value="individual" checked> <span><b>Só eu</b><small>Um e-mail, uma pessoa</small></span></label>
-          <label class="check"><input type="radio" name="sModo" value="equipe"> <span><b>Minha equipe</b><small>Um e-mail de grupo (ex.: operacional@) ou várias pessoas</small></span></label>
-        </fieldset>
         <div class="field"><label for="sNome">Seu nome</label><input id="sNome" autocomplete="name" required></div>
         <div class="field"><label for="sEmail">E-mail de trabalho</label><input id="sEmail" type="email" autocomplete="email" required></div>
         <div class="field"><label for="sSenha">Senha</label><input id="sSenha" type="password" autocomplete="new-password" minlength="8" required></div>
@@ -84,7 +80,7 @@
       </form>
 
       <form id="fLogin" novalidate hidden>
-        <div class="field"><label for="lEmail">Seu e-mail ou o e-mail do grupo</label><input id="lEmail" type="email" autocomplete="email" placeholder="ex.: operacional@suaempresa.com.br" required></div>
+        <div class="field"><label for="lEmail">Seu e-mail</label><input id="lEmail" type="email" autocomplete="email" placeholder="ex.: joao@suaempresa.com.br" required></div>
         <div class="field"><label for="lSenha">Senha</label><input id="lSenha" type="password" autocomplete="current-password" required></div>
         <p class="formerr" id="eLogin" role="alert"></p>
         <button type="submit" class="btn">Entrar</button>
