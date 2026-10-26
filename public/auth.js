@@ -18,7 +18,12 @@
   $("tabLogin").onclick = () => tab("login");
 
   // Já logado? vai direto para o app.
-  fetch("/api/state").then(r => { if (r.ok && !location.search.includes("token=")) location.href = "/app"; }).catch(() => {});
+  fetch("/api/state").then(r => {
+    if (location.search.includes("token=")) return;
+    if (r.ok) location.href = "/app";
+    // Aparelho que entrou pelo e-mail do grupo: volta direto para "Quem está usando?".
+    else fetch("/api/group-login").then(g => { if (g.ok) location.href = "/quem"; }).catch(() => {});
+  }).catch(() => {});
 
   function wire(form, errEl, fn) {
     form.addEventListener("submit", async ev => {

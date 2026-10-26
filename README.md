@@ -26,6 +26,20 @@ Tudo roda **sem dependências externas**: só Node.js 22.13 ou superior (banco S
 
 ---
 
+## Aplicativo instalável (computador e celular)
+
+A GENCO IA se instala como aplicativo (PWA), direto do endereço do app, sem loja:
+- **Windows e Mac:** no Chrome ou no Edge, botão **Instalar app** no topo do app (ou o ícone de instalar na barra de endereço). Ganha ícone na área de trabalho e no menu Iniciar e abre em janela própria.
+- **Android:** menu do navegador > **Instalar app**.
+- **iPhone e iPad:** no Safari, **Compartilhar > Adicionar à Tela de Início**.
+- Em **Configurações > Instalar a GENCO IA** aparece o passo a passo certo para cada aparelho.
+- O ícone mostra o número de pendências (o que está com a pessoa ou sem dono), onde o sistema permite (Windows, Mac, Android e iPhone com o app instalado).
+- Sem internet, o app abre e avisa que está sem conexão; volta sozinho quando a conexão retorna. Os e-mails nunca ficam guardados no aparelho.
+- Atualizações chegam sozinhas: cada nova versão publicada no Render é carregada na próxima abertura. Ao mudar as telas de forma grande, aumente `VERSION` em `public/sw.js`.
+- Requisito: o app precisa estar em **https** (o Render já entrega assim).
+
+---
+
 ## Para uma pessoa só ou para equipes
 
 No cadastro a empresa escolhe **"Só eu"** (uma pessoa, um e-mail) ou **"Minha equipe"** (e-mail de grupo ou várias pessoas). As duas formas usam a mesma tela **Pendências**:

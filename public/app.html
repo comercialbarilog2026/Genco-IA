@@ -6,6 +6,15 @@
 <title>GENCO IA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#131418">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GENCO IA">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -21,6 +30,7 @@
     <div class="ctl">
       <select id="boxSel" class="pillsel" aria-label="Caixa em uso na conversa" hidden></select>
       <span class="who" id="who"></span>
+      <button type="button" class="txtbtn install" id="bInstall" hidden>Instalar app</button>
       <button type="button" class="txtbtn" id="bSwap" hidden>Trocar pessoa</button>
       <button type="button" class="txtbtn" id="bNew">Nova conversa</button>
       <button type="button" class="txtbtn" id="bLogout">Sair</button>
@@ -54,6 +64,7 @@
 <main id="v-config" class="view" hidden><div class="page" id="config"></div></main>
 
 <div class="toast" id="toast" hidden></div>
+<script src="/pwa.js"></script>
 <script src="/app.js"></script>
 <script src="/grupos.js"></script>
 </body>

@@ -100,6 +100,7 @@
     if (person) return drawPerson(tools, cap);
     const b = buckets(), me = S.me;
     const total = b.needsOwner.length + b.mine.length + b.teamLate.length;
+    window.GencoPWA?.badge(b.needsOwner.length + b.mine.length); // no ícone: o que está com você ou sem dono
     const headline = total
       ? `${greeting()}, ${esc(firstName(me.name))}. <em>${plural(total, "coisa precisa", "coisas precisam")} de atenção</em> no ${esc(D.group.name)}.`
       : `${greeting()}, ${esc(firstName(me.name))}. Está tudo em dia no ${esc(D.group.name)}.`;
@@ -173,6 +174,7 @@
     const reading = D.inbox.filter(m => !m.triage).length;
     const rest = D.inbox.filter(m => !used.has(m.id));
     const total = now.length + soon.length;
+    window.GencoPWA?.badge(total);
     const headline = total
       ? `${greeting()}, ${esc(firstName(me.name))}. <em>${plural(total, "e-mail precisa", "e-mails precisam")} da sua resposta.</em>`
       : `${greeting()}, ${esc(firstName(me.name))}. Sua caixa está em dia.`;

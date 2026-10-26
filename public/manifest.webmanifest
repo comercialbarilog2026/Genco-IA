@@ -1,0 +1,24 @@
+{
+  "name": "GENCO IA",
+  "short_name": "GENCO IA",
+  "description": "Assistente de e-mails com IA: avisa o que está pendente e deixa as respostas prontas.",
+  "lang": "pt-BR",
+  "id": "/app",
+  "start_url": "/app?origem=app",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
+  "background_color": "#f5f5f6",
+  "theme_color": "#131418",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Pendências", "url": "/app?origem=app", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

@@ -213,6 +213,7 @@
           <div class="actions"><button type="button" class="btn ghost" id="cSync">Ler agora</button><button type="button" class="btn ghost" id="cSwap">Trocar de e-mail</button><button type="button" class="btn ghost" id="cOff">Desconectar</button></div>`
         : `<p class="muted">Nenhum e-mail conectado.</p><div class="actions"><button type="button" class="btn" id="cSwap">Conectar e-mail</button></div>`}
       </div>
+      ${window.GencoPWA && !window.GencoPWA.installed ? `<div class="panel" id="installPanel"></div>` : ""}
       <div class="panel" id="digestPanel"><h3>Resumo diário por e-mail</h3><p class="muted small">Carregando…</p></div>
       <div class="panel"><h3>Equipe e regras</h3>
         <p class="small muted">A GENCO IA usa estas regras para qualificar e indicar o responsável de cada e-mail. ${canRules() ? "Você também pode mudar conversando com ela." : "Só administradores e gestores podem alterar."}</p>
@@ -234,7 +235,7 @@
         <div class="actions">${S.company.hasSubscription ? `<button type="button" class="btn ghost" id="bPortal">Gerenciar assinatura e pagamento</button>` : `<button type="button" class="btn brand" id="bCheckout" ${S.features.stripe ? "" : "disabled"}>Assinar a GENCO IA</button>`}</div>
         <p class="small muted">Uso neste mês: ${S.usage.month} de ${S.usage.limit} mensagens para a IA.</p></div>` : ""}`;
 
-    loadDigest();
+    loadDigest(); renderInstall();
     const ro = !canRules();
     $("config").querySelectorAll("#teamRows input, #cCoord, #cAtraso, #cUrg, #cTom").forEach(el => el.disabled = ro);
     $("cSwap") && ($("cSwap").onclick = async () => { box = null; await refresh(); S.account = null; S.chat = []; show("conversa"); renderChat(); });
@@ -261,6 +262,24 @@
       $("bPortal") && ($("bPortal").onclick = async () => { try { location.href = (await api("POST", "/api/billing/portal")).url; } catch (e) { toast(e.message); } });
     }
   }
+  // ---------- instalar o app (computador e celular) ----------
+  function renderInstall() {
+    const box = $("installPanel"), P = window.GencoPWA; if (!box || !P) return;
+    const where = { ios: "iPhone ou iPad", android: "celular Android", windows: "computador (Windows)", mac: "Mac", outro: "dispositivo" }[P.platform];
+    box.innerHTML = `<h3>Instalar a GENCO IA</h3>
+      <p class="small muted">Instale como aplicativo no seu ${where}: ícone próprio, abre em janela própria e mostra no ícone quantas pendências você tem. Repita em cada computador e celular que for usar.</p>
+      ${P.canPrompt ? `<div class="actions"><button type="button" class="btn brand" id="cInstall">Instalar agora</button></div>`
+        : `<ol class="steps">${P.steps().map(s => `<li>${esc(s)}</li>`).join("")}</ol>`}`;
+    $("cInstall") && ($("cInstall").onclick = installNow);
+  }
+  async function installNow() { const ok = await window.GencoPWA.install(); if (ok) toast("GENCO IA instalada. Procure o ícone na sua área de trabalho ou tela inicial."); syncInstall(); }
+  function syncInstall() {
+    const P = window.GencoPWA; if (!P) return;
+    $("bInstall").hidden = !P.canPrompt || P.installed;
+    if (view === "config") renderInstall();
+  }
+  if (window.GencoPWA) { window.GencoPWA.onChange(syncInstall); $("bInstall").onclick = installNow; }
+
   async function loadDigest() {
     const box = $("digestPanel"); if (!box) return;
     try {
@@ -402,5 +421,16 @@
     if (q.get("conexao")) { toast(notes[q.get("conexao")] || ""); if (q.get("conexao") === "ok") setTimeout(refresh, 5000); }
     if (q.get("assinatura") === "ok") toast("Assinatura confirmada. Obrigado!");
     if (q.toString()) history.replaceState(null, "", "/app");
-  }).catch(() => {});
+  }).catch(e => { if (!S) offline(e); });
+
+  // Sem internet (ou servidor fora do ar): mensagem clara e nova tentativa automática quando a conexão voltar.
+  function offline(e) {
+    const off = !navigator.onLine || e instanceof TypeError;
+    $("v-conversa").style.display = "contents"; $("composer").hidden = true; $("pulse").hidden = true;
+    $("log").innerHTML = `<section class="hello"><span class="cap">GENCO IA</span><h2>${off ? "Sem conexão com a internet." : "Não consegui falar com o servidor agora."}</h2>
+      <p class="lead">${off ? "Assim que a conexão voltar, as pendências aparecem de novo." : esc(e.message || "")}</p>
+      <div class="actions"><button type="button" class="btn" id="bRetry">Tentar de novo</button></div></section>`;
+    $("bRetry").onclick = () => refresh().catch(offline);
+  }
+  addEventListener("online", () => { if (!S) refresh().catch(offline); });
 })();
