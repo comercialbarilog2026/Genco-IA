@@ -55,7 +55,7 @@
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
   const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"; };
   const byPriority = (a, b) => (PRI_ORD[a.triage?.prioridade] ?? 9) - (PRI_ORD[b.triage?.prioridade] ?? 9) || a.received_at - b.received_at;
-  let showAll = false;
+  let showAll = false, person = null; // person = id da pessoa na aba aberta (null = visão geral)
 
   // Separa a caixa do grupo em avisos, do mais importante para o menos.
   function buckets() {
@@ -83,6 +83,8 @@
       return;
     }
 
+    if (person && !D.members.some(m => m.id === person)) person = null;
+    if (person) return drawPerson(tools, cap);
     const b = buckets(), me = S.me;
     const total = b.needsOwner.length + b.mine.length + b.teamLate.length;
     const headline = total
@@ -112,11 +114,65 @@
     const calm = `<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail está", "outros e-mails estão")} com a equipe dentro do prazo` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
       ${showAll ? `<div class="pcards">${b.rest.sort((x, y) => y.received_at - x.received_at).map(card).join("")}</div>` : ""}`;
 
-    page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${headline}</h2></div>
+    page().innerHTML = `<div class="brief">${tools}${cap}${peopleTabs()}<h2 class="brief-h">${headline}</h2></div>
       <div id="gCfgBox"></div>
       <div class="avisos">${sections.join("")}${calm}</div>
       <form class="askbox" id="gAsk"><input id="gAskIn" placeholder="Pergunte à GENCO IA sobre o grupo — ex.: o que a Ana tem de urgente?" aria-label="Pergunta sobre o grupo"><button type="submit" class="send" aria-label="Perguntar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></form>`;
     wire();
+    if (configOpen && D.canManage) drawConfig();
+  }
+
+  // ---------- abas por pessoa ----------
+  function peopleTabs() {
+    const { esc, initials } = G();
+    if (!D.members.length) return "";
+    const openOf = id => D.inbox.filter(m => isOpen(m) && m.handling.assignee_id === id).length;
+    const lateOf = id => D.inbox.filter(m => isLate(m) && m.handling.assignee_id === id).length;
+    return `<nav class="ptabs" aria-label="Pessoas do grupo">
+      <button type="button" data-person="" aria-current="${!person}">Visão geral</button>
+      ${D.members.map(m => { const n = openOf(m.id), l = lateOf(m.id); return `<button type="button" data-person="${m.id}" aria-current="${person === m.id}"><span class="av sm">${esc(initials(m.name))}</span>${esc(firstName(m.name))}${n ? `<span class="pcount ${l ? "late" : ""}" title="${n} em aberto${l ? `, ${l} atrasado${l > 1 ? "s" : ""}` : ""}">${n}</span>` : ""}</button>`; }).join("")}
+    </nav>`;
+  }
+
+  function drawPerson(tools, cap) {
+    const { esc, S } = G(), p = D.members.find(m => m.id === person), isMe = p.id === S.me.id;
+    const mine = D.inbox.filter(m => m.handling.assignee_id === p.id);
+    const open = mine.filter(isOpen);
+    const late = open.filter(m => isLate(m) && m.handling.status !== "aguardando").sort(byPriority);
+    const onTime = open.filter(m => !isLate(m) && m.handling.status !== "aguardando").sort(byPriority);
+    const waiting = open.filter(m => m.handling.status === "aguardando");
+    const weekAgo = Date.now() - 7 * 864e5;
+    const done = mine.filter(m => m.handling.status === "resolvido" && (m.handling.updated_at || 0) >= weekAgo);
+    const suggested = D.inbox.filter(m => isOpen(m) && !m.handling.assignee_id && m.triage?.responsavel === p.name).sort(byPriority);
+    const nome = isMe ? "Você" : esc(firstName(p.name));
+    const headline = open.length
+      ? `${nome} ${isMe ? "está" : "está"} com <em>${plural(open.length, "e-mail", "e-mails")} em aberto</em>${late.length ? `, ${plural(late.length, "atrasado", "atrasados")}` : ", todos no prazo"}.`
+      : `${nome} não ${isMe ? "tem" : "tem"} nada pendente no grupo agora.`;
+    const fn = `<div class="pfunc"><span class="cap">${isMe ? "Sua função no grupo" : "Função no grupo"}${p.coordena ? " · responsável pelo grupo" : ""}</span>
+      <p id="pfText">${esc(p.regra || "Ainda não definida.")}</p>
+      ${D.canManage ? `<button type="button" class="linkbtn" id="pfEdit">Editar função</button>` : ""}</div>`;
+    const sections = [];
+    if (late.length) sections.push(aviso("crit", `<b>${plural(late.length, "atrasado", "atrasados")}.</b> ${late.length === 1 ? "O cliente está" : "Os clientes estão"} esperando resposta há mais de ${esc(D.atraso)} h.`, late, "p-late"));
+    if (suggested.length) sections.push(aviso("warn", `<b>${plural(suggested.length, "e-mail sem dono é", "e-mails sem dono são")} da área ${isMe ? "sua" : `de ${esc(firstName(p.name))}`}</b>, pela função acima.`, suggested, "p-sug"));
+    if (onTime.length) sections.push(aviso("ink", `<b>${plural(onTime.length, "dentro do prazo", "dentro do prazo")}.</b>`, onTime, "p-ok"));
+    if (waiting.length) sections.push(aviso("quiet", `<b>${plural(waiting.length, "aguardando", "aguardando")} retorno de terceiros.</b>`, waiting, "p-wait", true));
+    sections.push(`<p class="calm">${done.length ? `${plural(done.length, "e-mail resolvido", "e-mails resolvidos")} nos últimos 7 dias.` : "Nenhum e-mail resolvido nos últimos 7 dias."}${done.length ? ` <button type="button" class="linkbtn" data-open="p-done">${openSections.has("p-done") ? "" : "Ver"}</button>` : ""}</p>${openSections.has("p-done") && done.length ? `<div class="pcards">${done.map(card).join("")}</div>` : ""}`);
+
+    page().innerHTML = `<div class="brief">${tools}${cap}${peopleTabs()}<h2 class="brief-h">${headline}</h2>${fn}</div>
+      <div id="gCfgBox"></div>
+      <div class="avisos">${sections.join("")}</div>
+      <form class="askbox" id="gAsk"><input id="gAskIn" placeholder="Pergunte à GENCO IA sobre ${isMe ? "os seus e-mails" : "os e-mails de " + esc(firstName(p.name))}" aria-label="Pergunta"><button type="submit" class="send" aria-label="Perguntar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></form>`;
+    wire();
+    $("pfEdit") && ($("pfEdit").onclick = () => {
+      $("pfText").outerHTML = `<form class="noteform" id="pfForm"><input id="pfIn" value="${esc(p.regra || "")}" placeholder="O que essa pessoa cuida no grupo" aria-label="Função"><button type="submit" class="btn">Salvar</button></form>`;
+      $("pfEdit").hidden = true; $("pfIn").focus();
+      $("pfForm").onsubmit = async ev => {
+        ev.preventDefault();
+        const membros = D.members.map(m => ({ user_id: m.id, regra: m.id === p.id ? $("pfIn").value : m.regra, coordena: m.coordena }));
+        try { await G().api("PUT", `/api/groups/${current}/members`, { membros }); G().toast("Função salva. A IA passa a usar esta regra."); await reload(); }
+        catch (e) { G().toast(e.message); }
+      };
+    });
     if (configOpen && D.canManage) drawConfig();
   }
 
@@ -255,7 +311,7 @@
 
   function wire() {
     const root = page();
-    $("gSwitch") && ($("gSwitch").onchange = () => { current = Number($("gSwitch").value); openId = null; configOpen = false; showAll = false; render(); });
+    $("gSwitch") && ($("gSwitch").onchange = () => { current = Number($("gSwitch").value); openId = null; person = null; configOpen = false; showAll = false; render(); });
     root.querySelector("[data-newgroup]") && (root.querySelector("[data-newgroup]").onclick = () => { $("gCfgBox").innerHTML = createForm(); wireCreate(); $("gNome").focus(); });
     $("gSync") && ($("gSync").onclick = async () => {
       $("gSync").disabled = true; $("gSync").textContent = "Lendo…";
@@ -264,8 +320,9 @@
     });
     $("gCfg") && ($("gCfg").onclick = () => { configOpen = !configOpen; draw(); if (configOpen) $("gCfgBox").scrollIntoView({ behavior: "smooth", block: "start" }); });
     $("gAll") && ($("gAll").onclick = () => { showAll = !showAll; draw(); });
+    root.querySelectorAll("[data-person]").forEach(b => b.onclick = () => { person = Number(b.dataset.person) || null; openId = null; draw(); window.scrollTo?.(0, 0); $("v-grupos").scrollTop = 0; });
     root.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openSections.add(b.dataset.open); draw(); });
-    $("gAsk") && ($("gAsk").onsubmit = async ev => { ev.preventDefault(); const t = $("gAskIn").value.trim(); if (!t) return; await G().openChat(current); G().ask(t); });
+    $("gAsk") && ($("gAsk").onsubmit = async ev => { ev.preventDefault(); const t = $("gAskIn").value.trim(); if (!t) return; const p = person && D.members.find(m => m.id === person); await G().openChat(current); G().ask(p ? `Sobre ${p.id === G().S.me.id ? "os meus e-mails" : "os e-mails de " + p.name}: ${t}` : t); });
     root.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { openId = openId === b.dataset.toggle ? null : b.dataset.toggle; draw(); });
     root.querySelectorAll(".pcard").forEach(c => {
       const id = c.dataset.id;
