@@ -154,6 +154,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS group_excluded (     -- pessoas que o gestor
   email TEXT NOT NULL,
   PRIMARY KEY (group_id, email)
 );`);
+// Entrada com Google / Microsoft: estado do pedido de login (antes de existir sessão).
+db.exec(`CREATE TABLE IF NOT EXISTS login_states (
+  state TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);`);
 db.exec(`CREATE TABLE IF NOT EXISTS group_sessions (
   token_hash TEXT PRIMARY KEY,
   group_id INTEGER NOT NULL REFERENCES groups(user_id) ON DELETE CASCADE,

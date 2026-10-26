@@ -75,7 +75,21 @@ async function detectMembers(userId, acc, teamSeen = []) {
 }
 
 // Conecta qualquer provedor por IMAP: descobre o servidor (ou usa o informado), testa o login e guarda.
-async function connectImap(userId, { email, senha, host, port, secure }) {
+async function connectImap(userId, opts) {
+  const cfg = await resolveImap(opts);
+  saveOrRefresh(userId, "imap", { access: JSON.stringify(cfg), refresh: null, address: cfg.address });
+  return { host: cfg.host, port: cfg.port };
+}
+// Mesma conta de e-mail de antes: só renova o acesso, sem apagar o que já foi lido e qualificado.
+function saveOrRefresh(userId, provider, t) {
+  const cur = account(userId);
+  if (cur && cur.provider === provider && String(cur.address || "").toLowerCase() === String(t.address || "").toLowerCase()) {
+    run("UPDATE mail_accounts SET access_token_enc = ?, refresh_token_enc = COALESCE(?, refresh_token_enc), expires_at = ?, last_error = NULL WHERE user_id = ?",
+      encrypt(t.access), t.refresh ? encrypt(t.refresh) : null, t.expiresAt || null, userId);
+  } else saveAccount(userId, provider, t);
+}
+// Descobre o servidor e confere o login no próprio provedor. Devolve a configuração pronta para guardar.
+async function resolveImap({ email, senha, host, port, secure }) {
   email = String(email || "").trim().toLowerCase(); senha = String(senha || "");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !senha) throw Object.assign(new Error("Informe o e-mail e a senha."), { status: 400 });
   const found = host ? { candidates: [{ host: String(host).trim(), port: Number(port) || 993, secure: secure !== false && Number(port) !== 143 }] } : await discover(email);
@@ -84,8 +98,7 @@ async function connectImap(userId, { email, senha, host, port, secure }) {
     const cfg = { host: c.host, port: c.port, secure: c.secure, user: email, pass: senha, address: email };
     try {
       await imap.test(cfg);
-      saveAccount(userId, "imap", { access: JSON.stringify(cfg), refresh: null, address: email });
-      return { host: c.host, port: c.port };
+      return cfg;
     } catch (e) {
       lastErr = e;
       if (e.kind === "auth") break; // servidor certo, senha recusada: não adianta tentar outros
@@ -200,4 +213,4 @@ async function labelMessages(userId, ids) {
   } catch (e) { console.error("[etiquetas]", e.message); }
 }
 
-module.exports = { connectImap, discover, detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };
+module.exports = { connectImap, resolveImap, saveOrRefresh, discover, detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };

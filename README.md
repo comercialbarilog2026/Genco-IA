@@ -40,6 +40,16 @@ A GENCO IA se instala como aplicativo (PWA), direto do endereço do app, sem loj
 
 ---
 
+## Entrar com a conta do provedor (sem senha nova)
+
+Na tela inicial a pessoa escolhe **Entrar com Google**, **Entrar com Microsoft** ou **Entrar com outro e-mail**:
+- O nome e o e-mail vêm do provedor, a conta na GENCO IA é criada na hora (ou a pessoa entra na conta que já existe, inclusive quem foi convidado ou detectado num grupo) e a caixa de e-mail já fica conectada.
+- **Outro e-mail:** a pessoa digita o e-mail e a senha que já usa no provedor; o app confere direto no servidor de e-mail (IMAP) e entra. Gmail e Yahoo pedem senha de app.
+- Google e Microsoft usam o mesmo endereço de retorno já cadastrado para a conexão de e-mail (`/oauth/gmail/callback` e `/oauth/outlook/callback`).
+- Uso só interno (ex.: só @brcomexx.com.br): crie o app do Google Cloud como **Interno** dentro do Google Workspace da empresa — não precisa de verificação do Google. Para clientes de outras empresas, o app precisa ser **Externo** e passar pela verificação.
+
+---
+
 ## Para uma pessoa só ou para equipes
 
 No cadastro a empresa escolhe **"Só eu"** (uma pessoa, um e-mail) ou **"Minha equipe"** (e-mail de grupo ou várias pessoas). As duas formas usam a mesma tela **Pendências**:

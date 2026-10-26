@@ -14,6 +14,38 @@
     $("tabLogin").setAttribute("aria-pressed", String(which === "login"));
     $("seg").hidden = ["invite", "forgot", "reset"].includes(which);
   }
+  // ---------- entrar com a conta do provedor ----------
+  fetch("/api/health").then(r => r.json()).then(h => {
+    const off = (el, txt) => { el.classList.add("off"); el.removeAttribute("href"); el.setAttribute("aria-disabled", "true"); el.querySelector("small").textContent = txt; el.onclick = ev => { ev.preventDefault(); $("eSso").textContent = ""; }; };
+    if (!h.features?.gmail) off($("ssoGoogle"), "Em breve. Por enquanto, use \"Entrar com outro e-mail\" com uma senha de app do Google.");
+    if (!h.features?.outlook) off($("ssoMs"), "Em breve.");
+  }).catch(() => {});
+  $("ssoOther").onclick = () => { $("fSsoImap").hidden = !$("fSsoImap").hidden; if (!$("fSsoImap").hidden) $("oEmail").focus(); };
+  $("oEmail").addEventListener("change", async () => {
+    const d = (($("oEmail").value.split("@")[1]) || "").toLowerCase();
+    $("oHint").textContent = /^(gmail|googlemail)\./.test(d) ? "Gmail: use uma senha de app (myaccount.google.com > Segurança > Senhas de app), não a senha normal."
+      : /^(outlook|hotmail|live|msn)\./.test(d) ? "Outlook/Hotmail: use o botão Entrar com Microsoft."
+      : /^(yahoo|ymail|icloud|me|mac|aol)\./.test(d) ? "Este provedor pede uma senha de app, gerada nas configurações de segurança da conta." : "";
+  });
+  $("fSsoImap").addEventListener("submit", async ev => {
+    ev.preventDefault(); $("eSso").textContent = "";
+    const btn = $("fSsoImap").querySelector("button[type=submit]"); btn.disabled = true; btn.textContent = "Conferindo no seu provedor…";
+    try {
+      const adv = $("oServ").value.trim();
+      await post("/api/auth/imap", { email: $("oEmail").value, senha: $("oSenha").value, ...(adv ? { servidor: adv, porta: Number($("oPorta").value) || 993 } : {}) });
+      location.href = "/app?conexao=ok";
+    } catch (e) {
+      $("eSso").textContent = e.message; btn.disabled = false; btn.textContent = "Entrar";
+      if (/servidor|avançadas/i.test(e.message)) $("oAdv").open = true;
+    }
+  });
+  const erro = new URLSearchParams(location.search).get("erro");
+  if (erro) {
+    const msg = { "google-indisponivel": "A entrada com Google ainda não foi ativada neste servidor.", "microsoft-indisponivel": "A entrada com Microsoft ainda não foi ativada neste servidor.", cancelado: "Entrada cancelada.", expirado: "O pedido de entrada expirou. Tente de novo.", provedor: "Não foi possível entrar com o provedor. Tente de novo." }[erro];
+    if (msg) { $("fSsoImap").hidden = true; $("eSso").textContent = msg; $("fSsoImap").hidden = false; $("fSsoImap").querySelector("button[type=submit]").hidden = false; }
+    history.replaceState(null, "", "/");
+  }
+
   $("tabSignup").onclick = () => tab("signup");
   $("tabLogin").onclick = () => tab("login");
 

@@ -204,6 +204,20 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     assert.deepEqual(subjects, ["Agendamento", "Contêiner parado - segunda vez", "Obrigada", "Status do embarque"]);
     assert.ok(r.data.inbox.find(m => m.subject === "Agendamento").replied); step("IMAP no grupo: lê só o que foi para operacional@ e reconhece a resposta da equipe");
     assert.ok(r.data.members.some(m => m.email === "rafael.costa@brcomexx.com.br" && m.name === "Rafael Costa" && m.origem === "email")); step("IMAP no grupo: Rafael detectado automaticamente pela resposta dele");
+    // Entrar com a conta do provedor (sem senha da GENCO IA)
+    r = await call("sso1", "POST", "/api/auth/imap", { ...imapLogin, senha: "errada" }); assert.equal(r.status, 400);
+    r = await call("sso1", "POST", "/api/auth/imap", { ...imapLogin, senha: fake.pass });
+    assert.equal(r.status, 200); assert.equal(r.data.novo, false);
+    r = await call("sso1", "GET", "/api/state"); assert.equal(r.data.me.email, "caio@brcomexx.com.br"); assert.equal(r.data.myAccount.provider, "imap");
+    r = await call("sso1", "GET", "/api/me/box"); assert.ok(r.data.inbox.length >= 6 && r.data.inbox.some(m => m.triage)); step("Entrar com outro e-mail: conta existente entra pela senha do provedor, sem perder o que já foi lido");
+    const fake2 = await require("./fake-imap").start({ user: "joana@transportes-rapidos.com.br", pass: "senha-da-joana" });
+    r = await call("sso2", "POST", "/api/auth/imap", { email: "joana@transportes-rapidos.com.br", senha: "senha-da-joana", servidor: "127.0.0.1", porta: fake2.port, seguro: false });
+    assert.equal(r.data.novo, true);
+    r = await call("sso2", "GET", "/api/state");
+    assert.equal(r.data.me.role, "admin"); assert.equal(r.data.company.name, "Transportes-rapidos"); assert.equal(r.data.company.modo, "individual"); assert.equal(r.data.myAccount.address, "joana@transportes-rapidos.com.br");
+    step("Entrar com outro e-mail: conta nova criada a partir do provedor, com a caixa já conectada");
+    fake2.server.close();
+    r = await call("anon", "GET", "/auth/google"); assert.equal(r.status, 302); step("Entrar com Google avisa quando ainda não foi ativado no servidor");
     fake.server.close();
 
     // ---------- resumo diário e recuperação de senha (SMTP simulado) ----------

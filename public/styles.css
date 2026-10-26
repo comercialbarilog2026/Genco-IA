@@ -406,3 +406,19 @@ fieldset.modo .check:has(input:checked){border-color:var(--ink-2);background:var
 ol.steps{margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px;color:var(--ink-2)}
 /* app instalado: a barra do topo respeita a área do sistema (iPhone e janela do Windows/Mac) */
 @media (display-mode: standalone){.top{padding-top:env(safe-area-inset-top,0px)}}
+
+/* entrar com a conta do provedor */
+.sso{display:grid;gap:10px}
+.sso-h{margin:0;font-size:17px;font-weight:600}
+.ssobtn{display:grid;grid-template-columns:34px minmax(0,1fr);grid-template-rows:auto auto;column-gap:12px;align-items:center;text-align:left;border:1px solid var(--hair);background:var(--surface);border-radius:14px;padding:10px 14px;color:var(--ink);text-decoration:none;font-weight:600;font-size:14.5px}
+.ssobtn:hover{border-color:var(--ink-2)}
+.ssobtn small{grid-column:2;font-weight:400;font-size:12.5px;color:var(--muted)}
+.ssobtn .ssoi{grid-row:1/3;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:700;background:var(--sunk);color:var(--ink-2)}
+.ssoi.m{grid-template-columns:repeat(2,9px);gap:2px;place-content:center}
+.ssoi.m i{width:9px;height:9px;background:var(--ink-2)}
+.ssobtn.off{opacity:.55;cursor:default}
+.ssobtn.off:hover{border-color:var(--hair)}
+#fSsoImap{display:grid;gap:10px;border:1px solid var(--hair);border-radius:14px;padding:14px}
+#fSsoImap[hidden]{display:none}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12.5px;margin:6px 0 2px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--hair)}

@@ -261,8 +261,76 @@ router.get("/api/connect/:provider", async (ctx) => {
   run("INSERT INTO oauth_states (state, user_id, provider, created_at) VALUES (?, ?, ?, ?)", state, target.id, p, now());
   redirect(ctx.res, mail.PROVIDERS[p].authUrl(state, { group: target.id !== user.id }));
 });
+// ---------- entrar com a conta do provedor (Google, Microsoft ou qualquer e-mail) ----------
+// A pessoa não cria senha na GENCO IA: nome e e-mail vêm do provedor e a caixa já fica conectada.
+const FREE_DOMAINS = /^(gmail|googlemail|outlook|hotmail|live|msn|yahoo|ymail|icloud|me|mac|uol|bol|terra|ig|zoho|zohomail|aol|gmx|proton|protonmail)\./i;
+function companyNameFor(email, name) {
+  const domain = String(email).split("@")[1] || "";
+  if (!domain || FREE_DOMAINS.test(domain)) return name || email;
+  const base = domain.split(".")[0];
+  return base.length <= 4 ? base.toUpperCase() : base[0].toUpperCase() + base.slice(1);
+}
+function loginOrSignup({ email, name, provider, tokens }) {
+  email = String(email || "").trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, "O provedor não informou um e-mail válido.");
+  let u = one("SELECT * FROM users WHERE email = ? AND kind = 'pessoa'", email), isNew = false;
+  if (!u) {
+    const nome = String(name || "").trim() || email.split("@")[0];
+    const empresa = companyNameFor(email, nome);
+    const c = run("INSERT INTO companies (name, sector, modo, status, trial_ends_at, rules_json, created_at) VALUES (?, 'geral', 'individual', 'trialing', ?, ?, ?)",
+      empresa, now() + config.trialDays * 864e5, JSON.stringify(defaultRules("geral", empresa)), now());
+    const r = run("INSERT INTO users (company_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, NULL, 'admin', ?)", c.lastInsertRowid, nome, email, now());
+    u = one("SELECT * FROM users WHERE id = ?", Number(r.lastInsertRowid)); isNew = true;
+  } else if (u.invite_token) run("UPDATE users SET invite_token = NULL WHERE id = ?", u.id); // convite aceito ao entrar
+  if (tokens) mail.saveOrRefresh(u.id, provider, tokens);
+  return { user: one("SELECT * FROM users WHERE id = ?", u.id), isNew };
+}
+function readMailInBackground(user) {
+  const company = one("SELECT * FROM companies WHERE id = ?", user.company_id);
+  mail.sync(user.id, { ai: pdfReader(user, company) })
+    .then(r => r.added.length && config.autoTriage && billing.access(company).ok && agent.autoTriage(user, company))
+    .catch(e => console.error("[sync]", e.message));
+}
+const LOGIN_PROVIDERS = { google: "gmail", microsoft: "outlook" };
+router.get("/auth/:provider", async (ctx) => {
+  const p = LOGIN_PROVIDERS[ctx.params.provider];
+  if (!p) throw new HttpError(404, "Provedor desconhecido.");
+  if (!config.features[p]) return redirect(ctx.res, "/?erro=" + (p === "gmail" ? "google-indisponivel" : "microsoft-indisponivel"));
+  throttle("sso:" + ip(ctx.req), 30);
+  const state = sec.randomToken(24);
+  run("DELETE FROM login_states WHERE created_at < ?", now() - 15 * 60e3);
+  run("INSERT INTO login_states (state, provider, created_at) VALUES (?, ?, ?)", state, p, now());
+  redirect(ctx.res, mail.PROVIDERS[p].authUrl(state));
+});
+router.post("/api/auth/imap", async ({ req, res, body }) => {
+  const email = String(body.email || "").trim().toLowerCase();
+  throttle("imaplogin:" + ip(req) + ":" + email, 6);
+  let cfg;
+  try { cfg = await mail.resolveImap({ email, senha: body.senha, host: body.servidor || null, port: body.porta, secure: body.seguro !== false }); }
+  catch (e) { throw new HttpError(e.status || 400, e.message, e.needsAdvanced ? { needsAdvanced: true } : undefined); }
+  const { user, isNew } = loginOrSignup({ email, name: body.nome, provider: "imap", tokens: { access: JSON.stringify(cfg), refresh: null, address: email } });
+  readMailInBackground(user);
+  send(res, 200, { ok: true, novo: isNew }, { "Set-Cookie": sec.sessionCookie(sec.createSession(user.id)) });
+});
+
 router.get("/oauth/:provider/callback", async (ctx) => {
   const p = ctx.params.provider, q = ctx.query;
+  // Entrada com Google/Microsoft (ainda sem sessão)
+  const ls = one("SELECT * FROM login_states WHERE state = ? AND provider = ?", String(q.state || ""), p);
+  if (ls) {
+    run("DELETE FROM login_states WHERE state = ?", ls.state);
+    if (now() - ls.created_at > 15 * 60e3) return redirect(ctx.res, "/?erro=expirado");
+    if (q.error || !q.code) return redirect(ctx.res, "/?erro=cancelado");
+    try {
+      const t = await mail.PROVIDERS[p].exchange(String(q.code));
+      const { user, isNew } = loginOrSignup({ email: t.address, name: t.name, provider: p, tokens: t });
+      readMailInBackground(user);
+      return redirect(ctx.res, "/app?" + (isNew ? "bemvindo=1&" : "") + "conexao=ok", { "Set-Cookie": sec.sessionCookie(sec.createSession(user.id)) });
+    } catch (e) {
+      console.error("[entrada]", e.message);
+      return redirect(ctx.res, "/?erro=provedor");
+    }
+  }
   const st = one("SELECT * FROM oauth_states WHERE state = ? AND provider = ?", String(q.state || ""), p);
   if (!st || now() - st.created_at > 15 * 60e3) return redirect(ctx.res, "/app?conexao=expirada");
   run("DELETE FROM oauth_states WHERE state = ?", st.state);

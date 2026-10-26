@@ -40,6 +40,25 @@
     </section>
 
     <section class="authcard" aria-label="Acesso">
+      <div class="sso" id="sso">
+        <h3 class="sso-h">Entre com o e-mail que você já usa</h3>
+        <p class="fine">Sem criar senha nova: seu nome e seu e-mail vêm do provedor e a sua caixa já fica conectada.</p>
+        <a class="ssobtn" id="ssoGoogle" href="/auth/google"><span class="ssoi g" aria-hidden="true">G</span>Entrar com Google<small>Gmail e Google Workspace</small></a>
+        <a class="ssobtn" id="ssoMs" href="/auth/microsoft"><span class="ssoi m" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Entrar com Microsoft<small>Outlook e Microsoft 365</small></a>
+        <button type="button" class="ssobtn" id="ssoOther"><span class="ssoi o" aria-hidden="true">@</span>Entrar com outro e-mail<small>Locaweb, UOL, Hostinger, Yahoo, domínio próprio…</small></button>
+        <form id="fSsoImap" novalidate hidden>
+          <div class="field"><label for="oEmail">Seu e-mail</label><input id="oEmail" type="email" autocomplete="email" required></div>
+          <div class="field"><label for="oSenha">Senha do seu e-mail</label><input id="oSenha" type="password" autocomplete="current-password" required></div>
+          <p class="fine" id="oHint"></p>
+          <details class="adv" id="oAdv"><summary>Configurações avançadas (servidor IMAP)</summary>
+            <div class="field"><label for="oServ">Servidor IMAP</label><input id="oServ" placeholder="ex.: imap.suaempresa.com.br"></div>
+            <div class="field"><label for="oPorta">Porta</label><input id="oPorta" type="number" value="993"></div></details>
+          <p class="formerr" id="eSso" role="alert"></p>
+          <button type="submit" class="btn">Entrar</button>
+          <p class="fine">Conferimos a senha direto no seu provedor. Ela fica guardada criptografada e só serve para ler seus e-mails e salvar respostas como rascunho. Nada é enviado.</p>
+        </form>
+        <div class="or"><span>ou com e-mail e senha da GENCO IA</span></div>
+      </div>
       <div class="seg" id="seg">
         <button type="button" id="tabSignup" aria-pressed="true">Criar conta</button>
         <button type="button" id="tabLogin" aria-pressed="false">Entrar</button>

@@ -1,7 +1,7 @@
 // Conector Gmail (Google). Escopo gmail.modify: ler, criar rascunhos e aplicar etiquetas. Nunca envia.
 const config = require("../config");
 
-const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/gmail.modify"];
+const SCOPES = ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.modify"];
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const redirectUri = () => `${config.appUrl}/oauth/gmail/callback`;
 
@@ -23,7 +23,10 @@ async function token(params) {
 async function exchange(code) {
   const t = await token({ code, grant_type: "authorization_code", redirect_uri: redirectUri() });
   const profile = await api(t.access_token, "GET", "/profile");
-  return { access: t.access_token, refresh: t.refresh_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000, address: profile.emailAddress };
+  // nome da pessoa, para criar a conta na entrada com Google
+  let name = "";
+  try { const r = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: `Bearer ${t.access_token}` } }); if (r.ok) name = (await r.json()).name || ""; } catch {}
+  return { access: t.access_token, refresh: t.refresh_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000, address: profile.emailAddress, name };
 }
 async function refresh(refreshToken) {
   const t = await token({ refresh_token: refreshToken, grant_type: "refresh_token" });

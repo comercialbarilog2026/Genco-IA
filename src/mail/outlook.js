@@ -17,8 +17,8 @@ async function token(params) {
 }
 async function exchange(code) {
   const t = await token({ code, grant_type: "authorization_code", redirect_uri: redirectUri() });
-  const me = await api(t.access_token, "GET", "/me?$select=mail,userPrincipalName");
-  return { access: t.access_token, refresh: t.refresh_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000, address: me.mail || me.userPrincipalName };
+  const me = await api(t.access_token, "GET", "/me?$select=mail,userPrincipalName,displayName");
+  return { access: t.access_token, refresh: t.refresh_token, expiresAt: Date.now() + (t.expires_in - 60) * 1000, address: me.mail || me.userPrincipalName, name: me.displayName || "" };
 }
 async function refresh(refreshToken) {
   const t = await token({ refresh_token: refreshToken, grant_type: "refresh_token" });
