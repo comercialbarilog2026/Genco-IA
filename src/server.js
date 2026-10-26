@@ -229,6 +229,32 @@ router.get("/oauth/:provider/callback", async (ctx) => {
     redirect(ctx.res, "/app?conexao=erro" + back);
   }
 });
+// ---------- qualquer outro provedor (IMAP: e-mail + senha) ----------
+router.post("/api/connect/imap/discover", async (ctx) => {
+  auth(ctx);
+  try {
+    const d = await mail.discover(String(ctx.body.email || ""));
+    send(ctx.res, 200, { oauth: d.oauth, appPassword: d.appPassword, bridge: d.bridge, host: d.candidates[0]?.host || null, source: d.source });
+  } catch (e) { throw new HttpError(400, e.message); }
+});
+router.post("/api/connect/imap", async (ctx) => {
+  const { user, company } = auth(ctx);
+  throttle("imap:" + user.id, 10);
+  let owner = user;
+  if (ctx.body.grupo) {
+    const box = boxOf(ctx, user);
+    if (!groups.canManage(user)) throw new HttpError(403, "Só administradores e gestores conectam o e-mail do grupo.");
+    owner = boxUser(box.group);
+  }
+  const b = ctx.body;
+  try { await mail.connectImap(owner.id, { email: b.email, senha: b.senha, host: b.servidor || null, port: b.porta, secure: b.seguro !== false }); }
+  catch (e) { throw new HttpError(e.status || 400, e.message, e.needsAdvanced ? { needsAdvanced: true } : undefined); }
+  const r = await mail.sync(owner.id, { ai: pdfReader(owner, company) });
+  if (r.error) throw new HttpError(502, "Conectei, mas não consegui ler os e-mails: " + r.error);
+  if (config.autoTriage && billing.access(company).ok) await agent.autoTriage(owner, company).catch(e => console.error("[triagem]", e.message));
+  send(ctx.res, 200, { ok: true, added: r.added.length });
+});
+
 router.post("/api/connect/demo", async (ctx) => {
   const { user, company } = auth(ctx);
   const setor = SECTORS[ctx.body.setor] ? ctx.body.setor : company.sector;

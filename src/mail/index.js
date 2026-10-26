@@ -5,8 +5,11 @@ const { encrypt, decrypt } = require("../security");
 const gmail = require("./gmail");
 const outlook = require("./outlook");
 const demo = require("./demo");
+const imap = require("./imap");
+const { discover } = require("./discover");
 
-const PROVIDERS = { gmail, outlook };
+// gmail e outlook: acesso oficial (OAuth). imap: qualquer outro provedor, com e-mail e senha.
+const PROVIDERS = { gmail, outlook, imap };
 
 function account(userId) { return one("SELECT * FROM mail_accounts WHERE user_id = ?", userId); }
 
@@ -30,6 +33,8 @@ function disconnect(userId) {
 }
 
 async function accessToken(acc) {
+  // IMAP: o "token" é a configuração do servidor com a senha, guardada criptografada.
+  if (acc.provider === "imap") return JSON.parse(decrypt(acc.access_token_enc) || "{}");
   const p = PROVIDERS[acc.provider];
   if (acc.expires_at && acc.expires_at > now()) return decrypt(acc.access_token_enc);
   const r = await p.refresh(decrypt(acc.refresh_token_enc));
@@ -49,7 +54,8 @@ function groupFetchOptions(userId, acc) {
   const internal = new Set(all("SELECT u.email FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?", userId).map(r => r.email.toLowerCase()));
   if (addr) internal.add(addr);
   if (acc.address && acc.address.includes("@")) internal.add(acc.address.toLowerCase());
-  return { query, internal, teamDomain: addr.includes("@") ? addr.split("@")[1] : "" };
+  const filtering = !!addr && addr !== String(acc.address || "").toLowerCase();
+  return { query, internal, teamDomain: addr.includes("@") ? addr.split("@")[1] : "", groupAddress: filtering ? addr : "" };
 }
 
 // Separa automaticamente as pessoas do grupo: membros do grupo no Google (quando permitido) e
@@ -66,6 +72,29 @@ async function detectMembers(userId, acc, teamSeen = []) {
   if (teamSeen.length) added.push(...groups.addDetected(g, teamSeen, acc.provider === "demo" ? "demo" : "email"));
   if (added.length) require("../billing").syncSeats(g.company_id);
   return added;
+}
+
+// Conecta qualquer provedor por IMAP: descobre o servidor (ou usa o informado), testa o login e guarda.
+async function connectImap(userId, { email, senha, host, port, secure }) {
+  email = String(email || "").trim().toLowerCase(); senha = String(senha || "");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !senha) throw Object.assign(new Error("Informe o e-mail e a senha."), { status: 400 });
+  const found = host ? { candidates: [{ host: String(host).trim(), port: Number(port) || 993, secure: secure !== false && Number(port) !== 143 }] } : await discover(email);
+  let lastErr = null;
+  for (const c of found.candidates.slice(0, 6)) {
+    const cfg = { host: c.host, port: c.port, secure: c.secure, user: email, pass: senha, address: email };
+    try {
+      await imap.test(cfg);
+      saveAccount(userId, "imap", { access: JSON.stringify(cfg), refresh: null, address: email });
+      return { host: c.host, port: c.port };
+    } catch (e) {
+      lastErr = e;
+      if (e.kind === "auth") break; // servidor certo, senha recusada: não adianta tentar outros
+    }
+  }
+  const hint = found.oauth === "gmail" ? " Para Gmail, prefira o botão Gmail; por senha, use uma senha de app."
+    : found.oauth === "outlook" ? " Para Outlook e Microsoft 365, use o botão Outlook." : found.appPassword ? " Este provedor exige uma senha de app (gerada nas configurações de segurança da conta)." : "";
+  const msg = lastErr?.kind === "auth" ? lastErr.message : (host ? (lastErr?.message || "Não foi possível conectar.") : "Não consegui encontrar o servidor deste e-mail sozinho. Informe o servidor IMAP em \"Configurações avançadas\" (o provedor de e-mail informa).");
+  throw Object.assign(new Error(msg + hint), { status: 400, needsAdvanced: !host && lastErr?.kind !== "auth" });
 }
 
 function nextShortId(userId) {
@@ -171,4 +200,4 @@ async function labelMessages(userId, ids) {
   } catch (e) { console.error("[etiquetas]", e.message); }
 }
 
-module.exports = { detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };
+module.exports = { connectImap, discover, detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };

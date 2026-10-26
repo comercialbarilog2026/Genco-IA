@@ -159,6 +159,45 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("solo", "POST", "/api/me/handling", { ids: [pid], situacao: "invalida" }); assert.equal(r.status, 400); step("Pessoa sozinha marca e-mail como resolvido");
     r = await call("solo", "GET", "/api/team/overview"); assert.equal(r.data.people.length, 1); step("Empresa de uma pessoa conta 1 licença");
 
+    // ---------- qualquer provedor por IMAP (servidor IMAP simulado) ----------
+    const fake = await require("./fake-imap").start();
+    const imapLogin = { email: "caio@brcomexx.com.br", servidor: "127.0.0.1", porta: fake.port, seguro: false };
+    r = await call("imap", "POST", "/api/signup", { empresa: "BRCOMEXX IMAP", setor: "comex", modo: "equipe", nome: "Caio Pepe", email: "caio@brcomexx.com.br", senha: "senha-forte-9" });
+    assert.equal(r.status, 201);
+    r = await call("imap", "POST", "/api/connect/imap", { ...imapLogin, senha: "errada" });
+    assert.equal(r.status, 400); assert.ok(/recusad/.test(r.data.error)); step("IMAP: senha errada é recusada com mensagem clara");
+    r = await call("imap", "POST", "/api/connect/imap", { ...imapLogin, senha: fake.pass });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    r = await call("imap", "GET", "/api/me/box");
+    let box = r.data.inbox;
+    assert.equal(r.data.account.provider, "imap"); assert.equal(box.length, 6);
+    const joao = box.find(m => m.from_addr === "joao@cliente.com.br");
+    assert.equal(joao.from_name, "João Conceição"); assert.equal(joao.subject, "Contêiner parado - segunda vez"); assert.ok(/perecível/.test(joao.body));
+    assert.equal(joao.attachments[0].name, "Invoice 2291.pdf"); step("IMAP: e-mails lidos com acentos, anexo e remetente corretos");
+    assert.ok(box.find(m => m.subject === "Status do embarque").replied); assert.ok(box.find(m => m.subject === "Obrigada").replied); assert.ok(!joao.replied);
+    step("IMAP: respondidos reconhecidos pela pasta Enviados e pela marcação do servidor");
+    assert.ok(box.every(m => m.triage)); step("IMAP: caixa qualificada pela IA ao conectar");
+    r = await call("imap", "PUT", "/api/drafts/" + joao.id, { assunto: "Re: Contêiner parado", corpo: "Olá, João. Verificando agora." });
+    assert.equal(r.data.saved, true);
+    r = await call("imap", "PUT", "/api/drafts/" + joao.id, { assunto: "Re: Contêiner parado", corpo: "Olá, João. Liberação prevista hoje." });
+    assert.equal(fake.boxes.Rascunhos.msgs.length, 1);
+    const draftRaw = fake.boxes.Rascunhos.msgs[0].raw.toString();
+    assert.ok(/In-Reply-To: <m1@cliente.com.br>/.test(draftRaw)); assert.ok(Buffer.from(draftRaw.split("\r\n\r\n")[1].replace(/\s/g, ""), "base64").toString().includes("Liberação prevista"));
+    step("IMAP: resposta gravada na pasta Rascunhos (na mesma conversa) e substituída ao editar");
+    r = await call("imap", "POST", "/api/me/handling", { ids: [joao.id], situacao: "resolvido" }); assert.equal(r.status, 200);
+
+    // grupo lido pela conta de um membro: só o que vai para operacional@
+    const caioId = (await call("imap", "GET", "/api/state")).data.me.id;
+    r = await call("imap", "POST", "/api/groups", { nome: "Operacional", endereco: "operacional@brcomexx.com.br", membros: [{ user_id: caioId, coordena: true, regra: "Coordenação" }] });
+    const gImap = r.data.group.id;
+    r = await call("imap", "POST", "/api/connect/imap", { ...imapLogin, senha: fake.pass, grupo: gImap }); assert.equal(r.status, 200);
+    r = await call("imap", "GET", `/api/groups/${gImap}`);
+    const subjects = r.data.inbox.map(m => m.subject).sort();
+    assert.deepEqual(subjects, ["Agendamento", "Contêiner parado - segunda vez", "Obrigada", "Status do embarque"]);
+    assert.ok(r.data.inbox.find(m => m.subject === "Agendamento").replied); step("IMAP no grupo: lê só o que foi para operacional@ e reconhece a resposta da equipe");
+    assert.ok(r.data.members.some(m => m.email === "rafael.costa@brcomexx.com.br" && m.name === "Rafael Costa" && m.origem === "email")); step("IMAP no grupo: Rafael detectado automaticamente pela resposta dele");
+    fake.server.close();
+
     r = await call("ana", "POST", "/api/billing/checkout");
     assert.equal(r.status, 503); step("Assinatura avisa que o Stripe ainda não foi configurado");
 

@@ -12,7 +12,7 @@ O cliente paga apenas a assinatura da GENCO IA. O modelo de IA é contratado pel
 | --- | --- |
 | Contas | Cadastro da empresa, login, convite de funcionários por link, perfis (administrador, gestor, membro) |
 | Assinatura | Teste grátis (14 dias, sem cartão), checkout e portal do Stripe, cobrança por usuário, bloqueio automático quando a assinatura não está ativa |
-| E-mail | Conexão oficial com Gmail e Outlook (OAuth), leitura periódica, marcação de "já respondido", leitura de anexos, rascunhos na mesma conversa, etiquetas/categorias "GENCO IA/…" |
+| E-mail | Gmail e Outlook pelo acesso oficial (OAuth) e **qualquer outro provedor por IMAP** (Locaweb, UOL, Hostinger, Titan, Zoho, Yahoo, KingHost, iCloud, domínio próprio), com descoberta automática do servidor; leitura periódica, marcação de "já respondido", leitura de anexos, rascunhos na mesma conversa, etiquetas/categorias "GENCO IA/…" |
 | IA | Conversa em português, qualificação automática dos e-mails novos, rascunhos, conferência de documentos, aprende equipe e critérios pela conversa |
 | Troca de modelo | `AI_PROVIDER=anthropic`, `openai` ou `mock` (simulado). Trocar de fornecedor é mudar uma linha do `.env` |
 | Gestor | Tela "Equipe" com urgentes, atrasados, respostas prontas e e-mails a qualificar por pessoa |
@@ -105,6 +105,14 @@ Também roda em qualquer serviço com Node.js ou Docker (Railway, Fly.io, Digita
 4. Copie para `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`.
 5. **Importante:** enquanto o app estiver em modo de teste, só os e-mails cadastrados como "usuários de teste" conseguem conectar. Para abrir a clientes, o Google exige a **verificação do app** e, por usar o escopo `gmail.modify`, uma **avaliação de segurança anual feita por empresa credenciada**. Planeje prazo e custo para isso antes de vender.
 
+### Qualquer outro provedor (IMAP) — nada a configurar no servidor
+- A pessoa clica em **Outro provedor**, digita o e-mail e a senha. O app descobre o servidor sozinho: provedores conhecidos (UOL, BOL, Terra, Yahoo, iCloud, Zoho…), a hospedagem pelo registro MX do domínio (Locaweb, Titan, Hostinger, KingHost, Google, Microsoft), a configuração pública do Thunderbird e, por fim, `imap.dominio` e `mail.dominio`. Se não achar, pede o servidor em "Configurações avançadas".
+- Lê a caixa de entrada, reconhece os respondidos (pasta Enviados e marcação "respondido" do servidor) e grava as respostas na pasta **Rascunhos** da própria conta, na mesma conversa. Nunca envia.
+- A senha fica criptografada no banco (AES-256-GCM, com o `APP_SECRET`). Só conexões seguras (SSL/TLS ou STARTTLS) são aceitas.
+- Yahoo, iCloud e contas com verificação em duas etapas pedem **senha de app**. Microsoft 365 e Outlook.com não aceitam mais senha por IMAP: use o botão Outlook.
+- Funciona também para grupos: conecta a conta de um membro e o app lê só o que foi enviado para o endereço do grupo.
+- O cliente IMAP e o leitor de e-mails são próprios (sem dependências) e testados com um servidor IMAP simulado (`test/fake-imap.js`).
+
 ### 4. Outlook (Microsoft 365)
 1. No portal Azure (Microsoft Entra ID), em **Registros de aplicativo**, crie um registro para "contas em qualquer diretório organizacional e contas pessoais".
 2. Em **Autenticação**, adicione a plataforma *Web* com o redirecionamento `{APP_URL}/oauth/outlook/callback`.
@@ -137,7 +145,8 @@ src/
   groups.js        grupos de e-mail: membros, dono e situação, notas, histórico, atribuição automática, indicadores
   templates.js     regras iniciais por ramo (geral, comércio exterior, distribuição)
   ai/              camada de troca de modelo (anthropic, openai, mock)
-  mail/            conectores gmail, outlook e demonstração + orquestração
+  mail/            conectores gmail, outlook, imap (qualquer provedor) e demonstração + orquestração
+                   imap-client.js (cliente IMAP), mime.js (leitura de e-mails), discover.js (descoberta do servidor)
 public/            site, login e aplicativo (conversa, equipe, configurações)
 test/e2e.js        teste automático do fluxo completo
 ```

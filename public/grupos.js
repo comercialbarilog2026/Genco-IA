@@ -144,16 +144,18 @@
     if (!acc) {
       const f = S.features;
       page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${greeting()}, ${esc(firstName(me.name))}. Conecte o seu e-mail e eu aviso aqui tudo o que precisa de resposta.</h2>
-        <p class="lead">Eu leio pelo acesso oficial do Google ou da Microsoft, preparo as respostas como rascunho e nunca envio nada por você.</p></div>
+        <p class="lead">Funciona com Gmail, Outlook e qualquer outro provedor (Locaweb, UOL, Hostinger, Yahoo, e-mail do seu domínio). Eu preparo as respostas como rascunho e nunca envio nada por você.</p></div>
         <div id="gCfgBox"></div>
         <div class="connect">
           <button type="button" class="conn" data-pconn="gmail" ${f.gmail ? "" : "disabled"}><b>Gmail</b><span>${f.gmail ? "Gmail ou Google Workspace" : "Ainda não configurado neste servidor"}</span></button>
           <button type="button" class="conn" data-pconn="outlook" ${f.outlook ? "" : "disabled"}><b>Outlook</b><span>${f.outlook ? "Outlook.com ou Microsoft 365" : "Ainda não configurado neste servidor"}</span></button>
+          <button type="button" class="conn" data-pconn="imap"><b>Outro provedor</b><span>Locaweb, UOL, Hostinger, Yahoo, domínio próprio…</span></button>
           <button type="button" class="conn" data-pconn="demo"><b>Demonstração</b><span>E-mails fictícios do seu ramo, para conhecer</span></button>
-        </div>`;
+        </div><div id="imapBox"></div>`;
       wire();
       page().querySelectorAll("[data-pconn]").forEach(b => b.onclick = async () => {
         const p = b.dataset.pconn;
+        if (p === "imap") { G().imapConnect($("imapBox"), { onDone: async () => { await G().refresh(); } }); return; }
         if (p !== "demo") { location.href = "/api/connect/" + p; return; }
         b.disabled = true;
         try { await G().api("POST", "/api/connect/demo", { setor: S.company.sector }); await G().refresh(); G().toast("Caixa de demonstração conectada"); }
@@ -344,14 +346,15 @@
       <div class="actions"><button type="button" class="btn" id="cgMembers">Salvar membros</button></div>
 
       <h3>E-mail do grupo</h3>
-      ${acc ? `<p>${acc.provider === "demo" ? "Caixa de demonstração" : `${acc.provider === "gmail" ? "Gmail" : "Outlook"} · <b>${esc(acc.address || "")}</b>`}</p>
+      ${acc ? `<p>${acc.provider === "demo" ? "Caixa de demonstração" : `${({ gmail: "Gmail", outlook: "Outlook", imap: "IMAP" }[acc.provider] || acc.provider)} · <b>${esc(acc.address || "")}</b>`}</p>
           <div class="actions"><button type="button" class="btn ghost" id="cgOff">Desconectar</button></div>`
-        : `<p class="small muted">Conecte a conta que recebe os e-mails do grupo. <b>Se o grupo for uma lista do Google Groups</b> (cada membro recebe uma cópia), conecte a conta de um dos membros e preencha o endereço do grupo acima: a GENCO IA lê só o que chega para o grupo e reconhece quando alguém da equipe já respondeu. <b>Se for uma caixa própria</b> (com senha), conecte a própria caixa.</p>
+        : `<p class="small muted">Conecte a conta que recebe os e-mails do grupo. <b>Se o grupo for uma lista do Google Groups</b> (cada membro recebe uma cópia), conecte a conta de um dos membros e preencha o endereço do grupo acima: a GENCO IA lê só o que chega para o grupo e reconhece quando alguém da equipe já respondeu. <b>Se for uma caixa própria</b> (com senha), conecte a própria caixa. Funciona com Gmail, Outlook e qualquer outro provedor (Locaweb, UOL, Hostinger, Titan, domínio próprio…).</p>
           <div class="connect">
             <button type="button" class="conn" data-gconn="gmail" ${f.gmail ? "" : "disabled"}><b>Gmail</b><span>${f.gmail ? "Google Workspace" : "Ainda não configurado neste servidor"}</span></button>
             <button type="button" class="conn" data-gconn="outlook" ${f.outlook ? "" : "disabled"}><b>Outlook</b><span>${f.outlook ? "Microsoft 365 (caixa compartilhada)" : "Ainda não configurado neste servidor"}</span></button>
+            <button type="button" class="conn" data-gconn="imap"><b>Outro provedor</b><span>Locaweb, UOL, Hostinger, Titan, domínio próprio…</span></button>
             <button type="button" class="conn" data-gconn="demo"><b>Demonstração</b><span>E-mails fictícios para testar o grupo</span></button>
-          </div>`}
+          </div><div id="gImapBox"></div>`}
       ${S.me.role === "admin" ? `<h3>Excluir grupo</h3><p class="small muted">Apaga a fila, os donos, as notas e a conexão do grupo na GENCO IA. Os e-mails no Gmail não são apagados.</p><div class="actions"><button type="button" class="btn ghost danger" id="cgDel">Excluir grupo</button></div>` : ""}
     </div>`;
 
@@ -378,6 +381,7 @@
     };
     box.querySelectorAll("[data-gconn]").forEach(b => b.onclick = async () => {
       const p = b.dataset.gconn;
+      if (p === "imap") { G().imapConnect($("gImapBox"), { grupo: current, onDone: async () => { configOpen = false; await G().refresh(); } }); return; }
       if (p !== "demo") { location.href = `/api/connect/${p}?grupo=${current}`; return; }
       b.disabled = true;
       try { await G().api("POST", `/api/groups/${current}/connect/demo`, { setor: S.company.sector }); configOpen = false; G().toast("Caixa de demonstração conectada ao grupo"); await G().refresh(); }

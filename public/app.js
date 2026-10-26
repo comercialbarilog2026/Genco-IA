@@ -87,12 +87,13 @@
   function connectBlock(title) {
     const f = S.features;
     return `<section class="hello"><span class="cap">Primeiro passo</span><h2>${esc(title)}</h2>
-      <p class="lead">A GENCO IA lê os e-mails pelo acesso oficial do Google ou da Microsoft. Ela cria rascunhos e etiquetas, mas nunca envia nada por você. Você pode desconectar quando quiser.</p>
+      <p class="lead">A GENCO IA funciona com Gmail, Outlook e qualquer outro provedor de e-mail. Ela cria rascunhos, mas nunca envia nada por você. Você pode desconectar quando quiser.</p>
       <div class="connect">
         <button type="button" class="conn" data-connect="gmail" ${f.gmail ? "" : "disabled"}><b>Gmail</b><span>${f.gmail ? "Google Workspace ou Gmail" : "Ainda não configurado neste servidor"}</span></button>
         <button type="button" class="conn" data-connect="outlook" ${f.outlook ? "" : "disabled"}><b>Outlook</b><span>${f.outlook ? "Microsoft 365 ou Outlook.com" : "Ainda não configurado neste servidor"}</span></button>
+        <button type="button" class="conn" data-connect="imap"><b>Outro provedor</b><span>Locaweb, UOL, Hostinger, Yahoo, domínio próprio…</span></button>
         <button type="button" class="conn" data-connect="demo"><b>Caixa de demonstração</b><span>E-mails fictícios do seu ramo, para conhecer</span></button>
-      </div></section>`;
+      </div><div id="imapBox"></div></section>`;
   }
   function hello() {
     if (S.box && !S.account) return `<section class="hello"><span class="cap">Grupo ${esc(S.box.name)}</span><h2>O e-mail deste grupo ainda não foi conectado.</h2>
@@ -176,6 +177,7 @@
     catch (e) { toast(e.message); }
   }
   async function connect(p) {
+    if (p === "imap") { imapConnect($("imapBox")); return; }
     if (p === "demo") {
       try { await api("POST", "/api/connect/demo", { setor: S.company.sector }); await refresh(); toast("Caixa de demonstração conectada"); } catch (e) { toast(e.message); }
       return;
@@ -206,7 +208,7 @@
     const statusTxt = { active: "Assinatura ativa", trialing: `Teste grátis · ${acc.daysLeft} dia${acc.daysLeft === 1 ? "" : "s"} restante${acc.daysLeft === 1 ? "" : "s"}`, past_due: "Pagamento pendente", trial_ended: "Teste encerrado", canceled: "Assinatura cancelada" }[acc.status] || acc.status;
     $("config").innerHTML = `<h2>Configurações</h2>
       <div class="panel"><h3>Seu e-mail</h3>
-        ${a ? `<p>${a.provider === "demo" ? `Caixa de demonstração · <b>${esc((S.sectors || {})[a.demoSector] || "e-mails fictícios")}</b>` : `${a.provider === "gmail" ? "Gmail" : "Outlook"} · <b>${esc(a.address || "")}</b>`}</p>
+        ${a ? `<p>${a.provider === "demo" ? `Caixa de demonstração · <b>${esc((S.sectors || {})[a.demoSector] || "e-mails fictícios")}</b>` : `${({ gmail: "Gmail", outlook: "Outlook", imap: "IMAP" }[a.provider] || a.provider)} · <b>${esc(a.address || "")}</b>`}</p>
           <p class="small muted">${a.lastSync ? "Última leitura: " + new Date(a.lastSync).toLocaleString("pt-BR") : "Ainda não lido"}${a.error ? ` · <span class="err">${esc(a.error)}</span>` : ""}</p>
           <div class="actions"><button type="button" class="btn ghost" id="cSync">Ler agora</button><button type="button" class="btn ghost" id="cSwap">Trocar de e-mail</button><button type="button" class="btn ghost" id="cOff">Desconectar</button></div>`
         : `<p class="muted">Nenhum e-mail conectado.</p><div class="actions"><button type="button" class="btn" id="cSwap">Conectar e-mail</button></div>`}
@@ -318,8 +320,52 @@
   const grow = () => { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(180, t.scrollHeight) + "px"; };
   $("input").addEventListener("input", grow);
 
+  // ---------- "Outro provedor": qualquer e-mail com IMAP (Locaweb, UOL, Hostinger, Titan, Yahoo...) ----------
+  function imapConnect(container, { grupo = null, onDone } = {}) {
+    const id = "im" + Math.random().toString(36).slice(2, 7), el = s => $(id + s);
+    container.innerHTML = `<form class="panel imapf" id="${id}">
+      <h3>Conectar outro provedor</h3>
+      <p class="small muted">Locaweb, UOL, Hostinger, Titan, Zoho, Yahoo, KingHost, iCloud ou o e-mail do domínio da sua empresa. Digite o e-mail e a senha: eu encontro o servidor sozinho.</p>
+      <div class="grid2"><div class="field"><label for="${id}E">E-mail</label><input id="${id}E" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="${id}S">Senha do e-mail</label><input id="${id}S" type="password" autocomplete="current-password" required></div></div>
+      <p class="small" id="${id}H" aria-live="polite"></p>
+      <details class="adv" id="${id}A"><summary>Configurações avançadas (servidor IMAP)</summary>
+        <div class="grid2"><div class="field"><label for="${id}V">Servidor IMAP</label><input id="${id}V" placeholder="ex.: imap.suaempresa.com.br"></div>
+          <div class="field"><label for="${id}P">Porta</label><input id="${id}P" type="number" value="993"></div></div>
+        <label class="check small"><input type="checkbox" id="${id}T" checked> Conexão segura (SSL/TLS)</label>
+        <p class="small muted">Os dados ficam nas configurações de e-mail do seu provedor ou da sua hospedagem (procure por "IMAP").</p></details>
+      <p class="formerr" id="${id}R" role="alert"></p>
+      <div class="actions"><button type="submit" class="btn" id="${id}B">Conectar</button><button type="button" class="btn ghost" id="${id}C">Cancelar</button></div>
+      <p class="small muted">A senha fica guardada criptografada e só é usada para ler os e-mails e salvar as respostas na sua pasta Rascunhos. A GENCO IA nunca envia e-mails.</p>
+    </form>`;
+    el("C").onclick = () => { container.innerHTML = ""; };
+    el("E").onchange = async () => {
+      const email = el("E").value.trim(); if (!email.includes("@")) return;
+      try {
+        const d = await api("POST", "/api/connect/imap/discover", { email });
+        el("H").innerHTML = d.oauth === "gmail" ? `Este e-mail é do Google. O botão <b>Gmail</b> é mais seguro (sem senha). Se preferir por aqui, use uma <b>senha de app</b> do Google.`
+          : d.oauth === "outlook" ? `Este e-mail é da Microsoft. Use o botão <b>Outlook</b>: a Microsoft não aceita mais conexão por senha.`
+          : d.bridge ? `Este provedor só funciona com o aplicativo de ponte dele (Proton Bridge). Informe o servidor em Configurações avançadas.`
+          : d.appPassword ? `Este provedor pede uma <b>senha de app</b> (gerada nas configurações de segurança da conta), não a senha normal.`
+          : d.host && d.source !== "tentativa" ? `Servidor encontrado: <b>${esc(d.host)}</b>.` : "";
+      } catch { el("H").textContent = ""; }
+    };
+    el("").onsubmit = async ev => {
+      ev.preventDefault(); el("R").textContent = ""; el("B").disabled = true; el("B").textContent = "Conectando e lendo os e-mails…";
+      const adv = el("V").value.trim();
+      try {
+        await api("POST", "/api/connect/imap", { email: el("E").value, senha: el("S").value, grupo: grupo || undefined, ...(adv ? { servidor: adv, porta: Number(el("P").value) || 993, seguro: el("T").checked } : {}) });
+        toast("E-mail conectado"); container.innerHTML = ""; if (onDone) await onDone(); else await refresh();
+      } catch (e) {
+        el("R").textContent = e.message; el("B").disabled = false; el("B").textContent = "Conectar";
+        if (/servidor|Configurações avançadas/i.test(e.message)) el("A").open = true;
+      }
+    };
+    el("E").focus();
+  }
+
   // Ponte para a tela Grupos (grupos.js).
-  window.Genco = { api, toast, esc, ago, initials, md, get S() { return S; }, refresh, show, ask: t => send(t),
+  window.Genco = { api, toast, esc, ago, initials, md, get S() { return S; }, refresh, show, ask: t => send(t), imapConnect,
     openChat: async id => { box = id; await refresh(); show("conversa"); } };
 
   const q = new URLSearchParams(location.search);

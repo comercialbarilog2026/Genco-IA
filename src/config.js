@@ -49,7 +49,8 @@ if (!config.secret || config.secret.length < 32) {
 config.features = {
   gmail: !!(config.google.clientId && config.google.clientSecret),
   outlook: !!(config.microsoft.clientId && config.microsoft.clientSecret),
-  stripe: !!(config.stripe.secretKey && config.stripe.priceId)
+  stripe: !!(config.stripe.secretKey && config.stripe.priceId),
+  imap: true // qualquer provedor por IMAP, sem configuração no servidor
 };
 
 module.exports = config;
