@@ -74,19 +74,19 @@ function render(user, d) {
 
   const dot = p => ({ urgente: "#c2202e", alta: "#a0660a", normal: "#22764a", baixa: "#80828c" }[p] || "#c9cad0");
   const item = (m, late) => `<tr><td style="padding:8px 0;border-top:1px solid #ececf0;vertical-align:top;width:14px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dot(m.triage?.prioridade)};margin-top:6px"></span></td>
-    <td style="padding:8px 0;border-top:1px solid #ececf0"><b style="color:#131418">${esc(m.from_name || m.from_addr)}</b>${late(m) ? ` <span style="color:#d5001a;font-size:13px">esperando há ${esc(ago(m.received_at))}</span>` : ""}<br>
+    <td style="padding:8px 0;border-top:1px solid #ececf0"><b style="color:#131418">${esc(m.from_name || m.from_addr)}</b>${late(m) ? ` <span style="color:#e2001a;font-size:13px">esperando há ${esc(ago(m.received_at))}</span>` : ""}<br>
     <span style="color:#3b3d45">${esc(m.subject)}</span>${m.triage?.tarefa ? `<br><span style="color:#73757f;font-size:13px">${esc(m.triage.tarefa)}${m.handling?.assignee && m.handling.assignee_id !== user.id ? ` · com ${esc(m.handling.assignee)}` : ""}</span>` : ""}</td></tr>`;
   const html = `<!doctype html><html><body style="margin:0;background:#f5f5f6;font-family:Segoe UI,Roboto,Arial,sans-serif;color:#131418">
   <div style="max-width:620px;margin:0 auto;padding:28px 18px">
-    <div style="font-weight:700;letter-spacing:.22em;font-size:14px"><span style="display:inline-block;width:8px;height:8px;background:#d5001a;margin-right:8px"></span>GENCO <span style="color:#73757f;font-weight:500">IA</span></div>
+    <div><img src="${esc(config.appUrl)}/brand/genco-escuro.png" alt="GENCO" height="34" style="height:34px;width:auto;vertical-align:middle"> <span style="color:#e2001a;font-weight:700;letter-spacing:.12em;font-size:18px;vertical-align:middle">IA</span></div>
     <p style="color:#73757f;font-size:12px;letter-spacing:.12em;text-transform:uppercase;margin:24px 0 6px">${esc(day)}</p>
     <h1 style="font-size:24px;font-weight:500;line-height:1.3;margin:0 0 20px">${esc(head)}</h1>
     ${d.sections.map(s => `<div style="background:#fff;border:1px solid #e3e3e8;border-radius:14px;padding:14px 18px;margin-bottom:14px">
       <div style="font-weight:600;margin-bottom:4px">${esc(s.title)}</div>
       ${s.items ? `<table style="width:100%;border-collapse:collapse;font-size:14.5px">${s.items.map(m => item(m, s.late)).join("")}</table>${s.more > 0 ? `<div style="color:#73757f;font-size:13px;padding-top:6px">e mais ${s.more}</div>` : ""}`
-        : `<table style="width:100%;border-collapse:collapse;font-size:14.5px">${s.team.map(p => `<tr><td style="padding:7px 0;border-top:1px solid #ececf0">${esc(p.name)}</td><td style="padding:7px 0;border-top:1px solid #ececf0;text-align:right">${p.open} em aberto${p.late ? ` · <span style="color:#d5001a">${p.late} atrasado${p.late > 1 ? "s" : ""}</span>` : ""}</td></tr>`).join("")}</table>`}
+        : `<table style="width:100%;border-collapse:collapse;font-size:14.5px">${s.team.map(p => `<tr><td style="padding:7px 0;border-top:1px solid #ececf0">${esc(p.name)}</td><td style="padding:7px 0;border-top:1px solid #ececf0;text-align:right">${p.open} em aberto${p.late ? ` · <span style="color:#e2001a">${p.late} atrasado${p.late > 1 ? "s" : ""}</span>` : ""}</td></tr>`).join("")}</table>`}
       ${s.note ? `<div style="color:#73757f;font-size:13px;padding-top:6px">${esc(s.note)}</div>` : ""}</div>`).join("")}
-    <p style="margin:22px 0"><a href="${esc(url)}" style="background:#d5001a;color:#fff;text-decoration:none;padding:11px 20px;border-radius:999px;font-weight:600;display:inline-block">Abrir a GENCO IA</a></p>
+    <p style="margin:22px 0"><a href="${esc(url)}" style="background:#e2001a;color:#fff;text-decoration:none;padding:11px 20px;border-radius:999px;font-weight:600;display:inline-block">Abrir a GENCO IA</a></p>
     <p style="color:#73757f;font-size:12px">Você recebe este resumo nos dias úteis. Para mudar o horário ou desligar, vá em Configurações no app. A GENCO IA nunca envia e-mails aos seus clientes.</p>
   </div></body></html>`;
   return { subject, text, html };

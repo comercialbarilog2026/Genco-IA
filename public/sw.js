@@ -1,8 +1,8 @@
 // GENCO IA — service worker: permite instalar o app e abrir a tela mesmo sem internet.
 // Os dados (e-mails, pendências) nunca ficam guardados aqui: tudo que é /api vai sempre direto ao servidor.
-const VERSION = "genco-ia-v2"; // troque a cada mudança grande nas telas
+const VERSION = "genco-ia-v3"; // troque a cada mudança grande nas telas
 const SHELL = ["/app", "/", "/quem", "/styles.css", "/app.js", "/grupos.js", "/auth.js", "/quem.js", "/offline.html",
-  "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/favicon.ico"];
+  "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/favicon.ico", "/brand/genco-escuro.png", "/brand/genco-branco.png"];
 
 self.addEventListener("install", ev => {
   ev.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
