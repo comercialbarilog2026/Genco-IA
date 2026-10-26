@@ -14,7 +14,7 @@ let base;
 const jar = {};
 async function call(who, method, url, body, headers = {}) {
   const r = await fetch(base + url, { method, redirect: "manual", headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(jar[who] ? { Cookie: jar[who] } : {}), ...headers }, body: body !== undefined ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined });
-  const sc = r.headers.get("set-cookie"); if (sc) jar[who] = sc.split(";")[0];
+  for (const sc of r.headers.getSetCookie()) { const [kv] = sc.split(";"), [k] = kv.split("="); const m = new Map((jar[who] || "").split("; ").filter(Boolean).map(c => [c.split("=")[0], c])); m.set(k, kv); jar[who] = [...m.values()].join("; "); }
   const text = await r.text(); let data; try { data = JSON.parse(text); } catch { data = text; }
   return { status: r.status, data };
 }
@@ -113,13 +113,37 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("carla", "GET", "/api/state?grupo=" + gid); assert.equal(r.status, 404);
     r = await call("carla", "GET", "/api/groups"); assert.equal(r.data.groups.length, 0); step("Quem não é do grupo não vê a caixa do grupo");
     r = await call("ana", "GET", "/api/users"); assert.ok(r.data.users.every(u => !u.email.endsWith("@caixa.genco-ia"))); step("Caixa do grupo não aparece como pessoa");
-    await call("ana", "DELETE", "/api/users/" + r.data.users.find(u => u.email === "carla@exemplo.com").id);
+
+    // Pessoas detectadas automaticamente + entrada pelo e-mail do grupo
+    r = await call("ana", "GET", `/api/groups/${gid}`);
+    const detected = r.data.members.filter(m => m.origem === "demo");
+    assert.equal(detected.length, 4); step("Pessoas do grupo detectadas automaticamente (4 na demonstração)");
+    r = await call("ana", "PUT", `/api/groups/${gid}/access`, { senha: "curta" }); assert.equal(r.status, 400);
+    r = await call("ana", "PUT", `/api/groups/${gid}/access`, { senha: "grupo-senha-1" }); assert.equal(r.status, 200); step("Senha de acesso do grupo ativada");
+    r = await call("equipe", "POST", "/api/login", { email: "operacional@brcomexx.com.br", senha: "errada-123" }); assert.equal(r.status, 401);
+    r = await call("equipe", "POST", "/api/login", { email: "OPERACIONAL@brcomexx.com.br", senha: "grupo-senha-1" });
+    assert.equal(r.data.grupo, true);
+    r = await call("equipe", "GET", "/api/state"); assert.equal(r.status, 401); step("Login com o e-mail do grupo leva para \"quem está usando?\"");
+    r = await call("equipe", "GET", "/api/group-login");
+    assert.ok(r.data.members.length >= 6); const memberP = r.data.members.find(m => m.id === detected[0].id), adminP = r.data.members.find(m => m.id === anaId);
+    assert.equal(memberP.needsPassword, false); assert.equal(adminP.needsPassword, true);
+    r = await call("equipe", "POST", "/api/group-login/choose", { user_id: anaId }); assert.ok([401, 403].includes(r.status));
+    r = await call("equipe", "POST", "/api/group-login/choose", { user_id: anaId, senha: "errada" }); assert.equal(r.status, 401); step("Gestora precisa confirmar com a própria senha");
+    r = await call("equipe", "POST", "/api/group-login/choose", { user_id: memberP.id });
+    assert.equal(r.data.grupo, gid);
+    r = await call("equipe", "GET", "/api/state");
+    assert.equal(r.data.me.id, memberP.id); assert.equal(r.data.groupLogin.id, gid); step(`${memberP.name} entrou pelo grupo escolhendo o nome`);
+    r = await call("equipe", "GET", `/api/groups/${gid}`); assert.equal(r.status, 200); step("Pessoa que entrou pelo grupo vê as pendências do grupo");
+    r = await call("ana", "PUT", `/api/groups/${gid}/members`, { membros: (await call("ana", "GET", `/api/groups/${gid}`)).data.members.filter(m => m.id !== detected[1].id).map(m => ({ user_id: m.id, regra: m.regra, coordena: m.coordena })) });
+    r = await call("ana", "POST", `/api/groups/${gid}/detect`);
+    assert.ok(!r.data.members.some(m => m.id === detected[1].id)); step("Quem o gestor tirou do grupo não volta na próxima detecção");
+    await call("ana", "DELETE", "/api/users/" + (await call("ana", "GET", "/api/users")).data.users.find(u => u.email === "carla@exemplo.com").id);
 
     r = await call("bruno", "PUT", "/api/rules", { atraso: 1 });
     assert.equal(r.status, 403); step("Membro não altera as regras");
 
     r = await call("ana", "GET", "/api/team/overview");
-    assert.equal(r.data.people.length, 2); assert.ok(r.data.people.every(p => !("inbox" in p))); step("Gestora vê indicadores da equipe, sem conteúdo dos e-mails");
+    assert.ok(r.data.people.length >= 2); assert.ok(r.data.people.every(p => !("inbox" in p))); step("Gestora vê indicadores da equipe, sem conteúdo dos e-mails");
 
     r = await call("ana", "POST", "/api/billing/checkout");
     assert.equal(r.status, 503); step("Assinatura avisa que o Stripe ainda não foi configurado");

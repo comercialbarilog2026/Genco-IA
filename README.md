@@ -38,6 +38,14 @@ Para e-mails que chegam num endereço da equipe, como `operacional@empresa.com.b
 - Se um e-mail já tem outro dono, a IA avisa antes de preparar resposta, para duas pessoas não responderem a mesma coisa.
 - A caixa do grupo **não conta como licença** na assinatura. Quem não é membro (nem administrador ou gestor) não vê o grupo.
 
+**Entrada pelo e-mail do grupo e pessoas detectadas automaticamente**
+- Em **Pendências > Configurar**, o gestor cria a **senha do grupo**. A equipe entra no app com o endereço do grupo (ex.: `operacional@brcomexx.com.br`) e essa senha, e escolhe o próprio nome na tela **"Quem está usando?"**. O app abre direto na aba daquela pessoa.
+- Membros entram só escolhendo o nome. Administradores e gestores confirmam com a própria senha, para ninguém entrar como gestor pela senha do grupo.
+- O app **encontra as pessoas do grupo sozinho**: pelos membros do grupo no Google Workspace (permissão de leitura de grupos pedida ao conectar o Gmail do grupo) e por quem do mesmo domínio responde nas conversas do grupo. Quem o gestor tirar do grupo não volta na próxima busca.
+- Pessoas novas entram sem função. O app avisa o gestor para dizer o que cada uma cuida; ao salvar, a IA requalifica o que está sem dono e já divide os e-mails entre elas.
+- Cada pessoa detectada passa a contar como usuário na assinatura.
+- Para a leitura de membros, ative a **Cloud Identity API** no mesmo projeto do Google Cloud e inclua o escopo `cloud-identity.groups.readonly` na tela de consentimento. A conta conectada precisa poder ver os membros do grupo (configuração do grupo no Google Admin). Sem isso, o app usa só a detecção pelas respostas.
+
 **Como conectar o e-mail do grupo (Google Workspace)**
 - **Grupo do Google Groups** (cada membro recebe uma cópia): conecte o Gmail de um dos membros e preencha o **endereço do grupo**. A GENCO IA lê só o que chega para esse endereço (`to`, `cc`, `list`, `deliveredto`) e considera respondido quando alguém da equipe responde na mesma conversa, mesmo pelo próprio e-mail. Os rascunhos ficam no Gmail da conta conectada.
 - **Caixa própria** (o endereço tem senha e caixa de entrada): conecte a própria caixa. Nesse caso não é preciso filtro.

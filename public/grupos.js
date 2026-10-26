@@ -19,6 +19,9 @@
     const { S, esc } = G();
     if (!S.groups.length) return renderEmpty();
     if (!current || !S.groups.some(g => g.id === current)) current = S.groups[0].id;
+    // Quem entrou pelo e-mail do grupo abre direto na própria aba.
+    if (!render.opened && S.groupLogin && S.groupLogin.id === current) person = S.me.id;
+    render.opened = true;
     if (!D || D.group.id !== current) page().innerHTML = `<div class="brief"><span class="cap">GENCO IA</span><h2 class="brief-h">Vendo o que está pendente no grupo…</h2></div>`;
     try { D = await G().api("GET", "/api/groups/" + current); }
     catch (e) { page().innerHTML = `<div class="brief"><h2 class="brief-h">Não consegui abrir o grupo.</h2><p class="err">${esc(e.message)}</p></div>`; return; }
@@ -92,6 +95,8 @@
       : `${greeting()}, ${esc(firstName(me.name))}. Está tudo em dia no ${esc(D.group.name)}.`;
 
     const sections = [];
+    const noFn = D.members.filter(m => !String(m.regra || "").trim());
+    if (D.canManage && noFn.length) sections.push(`<section class="aviso ink"><div class="aviso-msg"><i></i><p><b>${noFn.length === 1 ? `Encontrei ${esc(firstName(noFn[0].name))} no grupo, mas ainda não sei o que ${esc(firstName(noFn[0].name))} cuida.` : `Encontrei ${noFn.length} pessoas no grupo sem função definida: ${noFn.map(m => esc(firstName(m.name))).join(", ")}.`}</b> Diga o que cada uma cuida para eu dividir os e-mails certo. <button type="button" class="linkbtn" data-person="${noFn[0].id}">Definir agora</button></p></div></section>`);
     if (b.needsOwner.length) {
       const urg = b.needsOwner.filter(m => m.triage?.prioridade === "urgente").length;
       sections.push(aviso("crit", `<b>${plural(b.needsOwner.length, "e-mail está", "e-mails estão")} sem ninguém cuidando${urg ? `, ${urg === b.needsOwner.length ? (urg === 1 ? "e é urgente" : "todos urgentes") : `${urg} urgente${urg > 1 ? "s" : ""}`}` : ""}.</b> Alguém precisa assumir.`, b.needsOwner, "semdono"));
@@ -149,11 +154,16 @@
       ? `${nome} ${isMe ? "está" : "está"} com <em>${plural(open.length, "e-mail", "e-mails")} em aberto</em>${late.length ? `, ${plural(late.length, "atrasado", "atrasados")}` : ", todos no prazo"}.`
       : `${nome} não ${isMe ? "tem" : "tem"} nada pendente no grupo agora.`;
     const fn = `<div class="pfunc"><span class="cap">${isMe ? "Sua função no grupo" : "Função no grupo"}${p.coordena ? " · responsável pelo grupo" : ""}</span>
-      <p id="pfText">${esc(p.regra || "Ainda não definida.")}</p>
+      <p id="pfText">${esc(p.regra || (D.canManage ? "Ainda não definida. Defina para a IA mandar os e-mails certos para esta pessoa." : "Ainda não definida. O gestor do grupo define o que cada pessoa cuida."))}</p>
       ${D.canManage ? `<button type="button" class="linkbtn" id="pfEdit">Editar função</button>` : ""}</div>`;
     const sections = [];
     if (late.length) sections.push(aviso("crit", `<b>${plural(late.length, "atrasado", "atrasados")}.</b> ${late.length === 1 ? "O cliente está" : "Os clientes estão"} esperando resposta há mais de ${esc(D.atraso)} h.`, late, "p-late"));
     if (suggested.length) sections.push(aviso("warn", `<b>${plural(suggested.length, "e-mail sem dono é", "e-mails sem dono são")} da área ${isMe ? "sua" : `de ${esc(firstName(p.name))}`}</b>, pela função acima.`, suggested, "p-sug"));
+    if (isMe) {
+      const sug = new Set(suggested.map(m => m.id));
+      const others = D.inbox.filter(m => isOpen(m) && !m.handling.assignee_id && m.triage?.prioridade !== "baixa" && !sug.has(m.id)).sort(byPriority);
+      if (others.length) sections.push(aviso("crit", `<b>${plural(others.length, "e-mail do grupo está", "e-mails do grupo estão")} sem ninguém cuidando.</b> Se for com você, é só assumir.`, others, "p-semdono", true));
+    }
     if (onTime.length) sections.push(aviso("ink", `<b>${plural(onTime.length, "dentro do prazo", "dentro do prazo")}.</b>`, onTime, "p-ok"));
     if (waiting.length) sections.push(aviso("quiet", `<b>${plural(waiting.length, "aguardando", "aguardando")} retorno de terceiros.</b>`, waiting, "p-wait", true));
     sections.push(`<p class="calm">${done.length ? `${plural(done.length, "e-mail resolvido", "e-mails resolvidos")} nos últimos 7 dias.` : "Nenhum e-mail resolvido nos últimos 7 dias."}${done.length ? ` <button type="button" class="linkbtn" data-open="p-done">${openSections.has("p-done") ? "" : "Ver"}</button>` : ""}</p>${openSections.has("p-done") && done.length ? `<div class="pcards">${done.map(card).join("")}</div>` : ""}`);
@@ -237,10 +247,17 @@
         <p class="small muted">Use a mesma sintaxe da busca do Gmail, por exemplo <code>list:operacional@empresa.com.br</code> ou <code>label:operacional</code>.</p></details>
       <div class="actions"><button type="button" class="btn" id="cgSave">Salvar</button></div>
 
-      <h3>Membros</h3>
-      <p class="small muted">Marque quem atende este grupo e escreva o que cada pessoa cuida. A IA usa isso para sugerir o dono de cada e-mail.</p>
+      <h3>Acesso pelo e-mail do grupo</h3>
+      <p class="small muted">A equipe entra com <b>${esc(D.group.address || "o endereço do grupo")}</b> e esta senha e depois escolhe quem é. Membros entram só escolhendo o nome; administradores e gestores confirmam com a própria senha.</p>
+      <div class="actions"><input id="cgPass" type="password" class="pillin" placeholder="${D.group.groupLogin ? "Nova senha do grupo (já existe uma)" : "Crie a senha do grupo"}" autocomplete="new-password" aria-label="Senha do grupo">
+        <button type="button" class="btn" id="cgPassSave">${D.group.groupLogin ? "Trocar senha" : "Ativar acesso pelo grupo"}</button>
+        ${D.group.groupLogin ? `<button type="button" class="btn ghost" id="cgPassOff">Desligar</button>` : ""}</div>
+
+      <h3>Pessoas do grupo</h3>
+      <p class="small muted">A GENCO IA encontra as pessoas sozinha: pelos membros do grupo no Google Workspace e por quem da equipe responde nas conversas do grupo. Aqui você ajusta o que cada pessoa cuida — a IA usa isso para definir o dono de cada e-mail.</p>
+      ${acc ? `<div class="actions"><button type="button" class="btn ghost" id="cgDetect">Buscar pessoas do grupo agora</button></div>` : ""}
       <div class="mrows">${people.map(p => { const m = mem.get(p.id); return `<div class="mrow" data-p="${p.id}">
-          <label class="check"><input type="checkbox" ${m ? "checked" : ""} data-in> <span><b>${esc(p.name)}</b><small>${esc(p.email)}</small></span></label>
+          <label class="check"><input type="checkbox" ${m ? "checked" : ""} data-in> <span><b>${esc(p.name)}${m && m.origem !== "manual" ? `<span class="pchip">detectado${m.origem === "google" ? " no Google" : ""}</span>` : ""}</b><small>${esc(p.email)}</small></span></label>
           <input data-regra value="${esc(m?.regra || "")}" placeholder="O que essa pessoa cuida no grupo" aria-label="Regra de ${esc(p.name)}">
           <label class="check small"><input type="radio" name="coord" data-coord ${m?.coordena ? "checked" : ""}> responsável</label></div>`; }).join("")}</div>
       <div class="actions"><button type="button" class="btn" id="cgMembers">Salvar membros</button></div>
@@ -261,6 +278,18 @@
       try { await G().api("PUT", "/api/groups/" + current, { nome: $("cgNome").value, endereco: $("cgEnd").value, filtro: $("cgFiltro").value, autoAtribuir: $("cgAuto").checked }); G().toast("Grupo salvo"); await G().refresh(); }
       catch (e) { G().toast(e.message); }
     };
+    $("cgPassSave").onclick = async () => {
+      try { await G().api("PUT", `/api/groups/${current}/access`, { senha: $("cgPass").value }); G().toast("Acesso pelo grupo ativado. A equipe já pode entrar com o e-mail do grupo."); await G().refresh(); }
+      catch (e) { G().toast(e.message); }
+    };
+    $("cgPassOff") && ($("cgPassOff").onclick = async () => {
+      try { await G().api("PUT", `/api/groups/${current}/access`, { senha: "" }); G().toast("Acesso pelo grupo desligado"); await G().refresh(); } catch (e) { G().toast(e.message); }
+    });
+    $("cgDetect") && ($("cgDetect").onclick = async () => {
+      $("cgDetect").disabled = true; $("cgDetect").textContent = "Buscando…";
+      try { const d = await G().api("POST", `/api/groups/${current}/detect`); G().toast(d.added.length ? `Encontrei ${d.added.length} pessoa${d.added.length > 1 ? "s" : ""}: ${d.added.join(", ")}` : "Nenhuma pessoa nova encontrada"); await reload(); }
+      catch (e) { G().toast(e.message); $("cgDetect").disabled = false; }
+    });
     $("cgMembers").onclick = async () => {
       const membros = [...box.querySelectorAll(".mrow")].filter(r => r.querySelector("[data-in]").checked).map(r => ({ user_id: Number(r.dataset.p), regra: r.querySelector("[data-regra]").value, coordena: r.querySelector("[data-coord]").checked }));
       try { await G().api("PUT", `/api/groups/${current}/members`, { membros }); G().toast("Membros salvos"); await G().refresh(); }

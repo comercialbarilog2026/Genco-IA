@@ -50,6 +50,24 @@ function sessionUser(token) {
   if (!row || row.expires_at < now()) return null;
   return row;
 }
+// Acesso pelo e-mail do grupo: a sessão do grupo só permite escolher quem está usando.
+function createGroupSession(groupId) {
+  const token = randomToken();
+  run("INSERT INTO group_sessions (token_hash, group_id, expires_at) VALUES (?, ?, ?)", sha(token), groupId, now() + SESSION_DAYS * 864e5);
+  return token;
+}
+function groupSession(token) {
+  if (!token) return null;
+  const row = one("SELECT * FROM group_sessions WHERE token_hash = ?", sha(token));
+  return row && row.expires_at > now() ? row.group_id : null;
+}
+function destroyGroupSession(token) { if (token) run("DELETE FROM group_sessions WHERE token_hash = ?", sha(token)); }
+function groupCookie(token, maxAgeDays = SESSION_DAYS) {
+  const parts = [`genco_grp=${token}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${Math.round(maxAgeDays * 86400)}`];
+  if (config.appUrl.startsWith("https://")) parts.push("Secure");
+  return parts.join("; ");
+}
+
 function destroySession(token) { if (token) run("DELETE FROM sessions WHERE token_hash = ?", sha(token)); }
 
 function sessionCookie(token, maxAgeDays = SESSION_DAYS) {
@@ -58,4 +76,5 @@ function sessionCookie(token, maxAgeDays = SESSION_DAYS) {
   return parts.join("; ");
 }
 
-module.exports = { hashPassword, verifyPassword, encrypt, decrypt, createSession, sessionUser, destroySession, sessionCookie, randomToken, sha };
+module.exports = { hashPassword, verifyPassword, encrypt, decrypt, createSession, sessionUser, destroySession, sessionCookie, randomToken, sha,
+  createGroupSession, groupSession, destroyGroupSession, groupCookie };

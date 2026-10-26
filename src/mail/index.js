@@ -49,7 +49,23 @@ function groupFetchOptions(userId, acc) {
   const internal = new Set(all("SELECT u.email FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?", userId).map(r => r.email.toLowerCase()));
   if (addr) internal.add(addr);
   if (acc.address && acc.address.includes("@")) internal.add(acc.address.toLowerCase());
-  return { query, internal };
+  return { query, internal, teamDomain: addr.includes("@") ? addr.split("@")[1] : "" };
+}
+
+// Separa automaticamente as pessoas do grupo: membros do grupo no Google (quando permitido) e
+// quem da equipe responde nas conversas do grupo.
+async function detectMembers(userId, acc, teamSeen = []) {
+  const groups = require("../groups");
+  const g = groups.byBox(userId);
+  if (!g) return [];
+  const added = [];
+  if (acc.provider === "gmail" && g.address) {
+    try { added.push(...groups.addDetected(g, await gmail.listGroupMembers(await accessToken(acc), g.address), "google")); }
+    catch (e) { if (e.status !== 403 && e.status !== 404) console.error("[membros]", e.message); }
+  }
+  if (teamSeen.length) added.push(...groups.addDetected(g, teamSeen, acc.provider === "demo" ? "demo" : "email"));
+  if (added.length) require("../billing").syncSeats(g.company_id);
+  return added;
 }
 
 function nextShortId(userId) {
@@ -89,7 +105,8 @@ async function sync(userId, { ai } = {}) {
       added.push(id);
     }
     run("UPDATE mail_accounts SET last_sync_at = ?, last_error = NULL WHERE user_id = ?", now(), userId);
-    return { added };
+    const newPeople = await detectMembers(userId, acc, list.teamSeen || []);
+    return { added, newPeople };
   } catch (e) {
     run("UPDATE mail_accounts SET last_error = ? WHERE user_id = ?", e.message, userId);
     return { added: [], error: e.message };
@@ -154,4 +171,4 @@ async function labelMessages(userId, ids) {
   } catch (e) { console.error("[etiquetas]", e.message); }
 }
 
-module.exports = { PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };
+module.exports = { detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };

@@ -5,8 +5,11 @@ const SCOPES = ["openid", "email", "https://www.googleapis.com/auth/gmail.modify
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const redirectUri = () => `${config.appUrl}/oauth/gmail/callback`;
 
-function authUrl(state) {
-  const p = new URLSearchParams({ client_id: config.google.clientId, redirect_uri: redirectUri(), response_type: "code", scope: SCOPES.join(" "), access_type: "offline", prompt: "consent", include_granted_scopes: "true", state });
+// Na conexão de um grupo pedimos também a leitura dos membros do grupo (Google Workspace / Cloud Identity),
+// para o app separar automaticamente cada pessoa do grupo.
+const GROUP_SCOPE = "https://www.googleapis.com/auth/cloud-identity.groups.readonly";
+function authUrl(state, { group = false } = {}) {
+  const p = new URLSearchParams({ client_id: config.google.clientId, redirect_uri: redirectUri(), response_type: "code", scope: [...SCOPES, ...(group ? [GROUP_SCOPE] : [])].join(" "), access_type: "offline", prompt: "consent", include_granted_scopes: "true", state });
   return "https://accounts.google.com/o/oauth2/v2/auth?" + p;
 }
 
@@ -52,7 +55,8 @@ function walk(part, out) {
 // query: filtro extra (caixa de grupo). internal: endereços da própria equipe — e-mails deles no grupo
 // contam como resposta, não como e-mail novo a atender.
 const internalSkip = new Map(); // ids já vistos como mensagens internas (evita reler a cada ciclo)
-async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), query = "", internal = null } = {}) {
+async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), query = "", internal = null, teamDomain = "" } = {}) {
+  const teamSeen = new Map();
   const base = query ? `newer_than:${days}d ${query} -in:sent -in:drafts -in:trash -in:spam` : `in:inbox newer_than:${days}d -category:promotions -category:social`;
   const list = await api(access, "GET", `/messages?maxResults=${max}&q=${encodeURIComponent(base)}`);
   const sent = await api(access, "GET", `/messages?maxResults=60&q=${encodeURIComponent(`in:sent newer_than:${days + 2}d`)}`);
@@ -68,7 +72,11 @@ async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), q
     if (internal && internalSkip.has(ref.id)) { markSent(ref.threadId, internalSkip.get(ref.id)); continue; }
     const m = await api(access, "GET", `/messages/${ref.id}?format=full`);
     const from = parseFrom(header(m.payload.headers, "From"));
-    if (internal && internal.has(from.addr.toLowerCase())) {
+    const fromAddr = from.addr.toLowerCase();
+    // Alguém do mesmo domínio respondendo na conversa do grupo = pessoa da equipe (detectada automaticamente).
+    const isTeamReply = teamDomain && fromAddr.endsWith("@" + teamDomain) && !!header(m.payload.headers, "In-Reply-To");
+    if (isTeamReply) teamSeen.set(fromAddr, { email: fromAddr, name: from.name });
+    if (internal && (internal.has(fromAddr) || isTeamReply)) {
       // Resposta de alguém da equipe (ex.: respondeu pelo próprio e-mail com cópia para o grupo).
       internalSkip.set(ref.id, Number(m.internalDate)); markSent(m.threadId, Number(m.internalDate));
       continue;
@@ -97,6 +105,7 @@ async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), q
   }
   // Atualiza "respondido" também dos já conhecidos.
   out.filter(x => x.known).forEach(x => { x.lastSent = lastSentByThread[x.thread_id] || 0; });
+  out.teamSeen = [...teamSeen.values()];
   return out;
 }
 
@@ -135,4 +144,23 @@ async function applyLabels(access, msg, names) {
   await api(access, "POST", `/messages/${msg.provider_id}/modify`, { addLabelIds: ids, removeLabelIds: old });
 }
 
-module.exports = { authUrl, exchange, refresh, fetchRecent, createDraft, updateDraft, applyLabels };
+// Membros do grupo do Google Workspace (precisa do escopo de leitura de grupos e que a conta possa ver os membros).
+async function listGroupMembers(access, groupAddress) {
+  const CI = "https://cloudidentity.googleapis.com/v1";
+  const call = async url => {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${access}` } });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error("Google Grupos: " + (d.error?.message || res.status)); e.status = res.status; throw e; }
+    return d;
+  };
+  const g = await call(`${CI}/groups:lookup?${new URLSearchParams({ "groupKey.id": groupAddress })}`);
+  const out = []; let pageToken = "";
+  do {
+    const d = await call(`${CI}/${g.name}/memberships?${new URLSearchParams({ view: "FULL", pageSize: "200", ...(pageToken ? { pageToken } : {}) })}`);
+    for (const m of d.memberships || []) if ((m.type || "USER") === "USER" && m.preferredMemberKey?.id) out.push({ email: m.preferredMemberKey.id.toLowerCase(), name: "" });
+    pageToken = d.nextPageToken || "";
+  } while (pageToken);
+  return out;
+}
+
+module.exports = { authUrl, exchange, refresh, fetchRecent, listGroupMembers, createDraft, updateDraft, applyLabels };

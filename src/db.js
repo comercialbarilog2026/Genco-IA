@@ -141,6 +141,18 @@ function addColumn(table, column, ddl) {
 }
 addColumn("users", "kind", "kind TEXT NOT NULL DEFAULT 'pessoa'");   // pessoa | grupo
 addColumn("chats", "box_id", "box_id INTEGER");                     // NULL = caixa pessoal
+addColumn("groups", "password_hash", "password_hash TEXT");          // acesso da equipe pelo e-mail do grupo
+addColumn("group_members", "origem", "origem TEXT NOT NULL DEFAULT 'manual'"); // manual | google | email | demo
+db.exec(`CREATE TABLE IF NOT EXISTS group_excluded (     -- pessoas que o gestor tirou do grupo: a detecção não as recoloca
+  group_id INTEGER NOT NULL REFERENCES groups(user_id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  PRIMARY KEY (group_id, email)
+);`);
+db.exec(`CREATE TABLE IF NOT EXISTS group_sessions (
+  token_hash TEXT PRIMARY KEY,
+  group_id INTEGER NOT NULL REFERENCES groups(user_id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL
+);`);
 db.exec("CREATE INDEX IF NOT EXISTS idx_chats_box ON chats(user_id, box_id, id);");
 
 const now = () => Date.now();

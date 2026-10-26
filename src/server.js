@@ -70,13 +70,50 @@ router.post("/api/login", async ({ req, res, body }) => {
   const email = String(body.email || "").trim().toLowerCase();
   throttle("login:" + ip(req) + ":" + email);
   const u = one("SELECT * FROM users WHERE email = ? AND kind = 'pessoa'", email);
+  // Entrada pelo e-mail do grupo (ex.: operacional@): depois a pessoa escolhe quem ela é.
+  const grp = !u && groups.byAddress(email);
+  if (grp) {
+    if (!sec.verifyPassword(String(body.senha || ""), grp.password_hash)) throw new HttpError(401, "E-mail ou senha incorretos.");
+    return send(res, 200, { ok: true, grupo: true }, { "Set-Cookie": sec.groupCookie(sec.createGroupSession(grp.user_id)) });
+  }
   if (!u || !sec.verifyPassword(String(body.senha || ""), u.password_hash)) throw new HttpError(401, "E-mail ou senha incorretos.");
   send(res, 200, { ok: true }, { "Set-Cookie": sec.sessionCookie(sec.createSession(u.id)) });
 });
 
 router.post("/api/logout", async ({ res, cookies }) => {
   sec.destroySession(cookies.genco_sess);
-  send(res, 200, { ok: true }, { "Set-Cookie": sec.sessionCookie("", 0) });
+  sec.destroyGroupSession(cookies.genco_grp);
+  res.setHeader("Set-Cookie", [sec.sessionCookie("", 0), sec.groupCookie("", 0)]);
+  send(res, 200, { ok: true });
+});
+
+// ---------- entrada pelo e-mail do grupo: "quem está usando?" ----------
+function groupFromCookie(ctx) {
+  const gid = sec.groupSession(ctx.cookies.genco_grp);
+  const g = gid && groups.byBox(gid);
+  if (!g || !g.password_hash) throw new HttpError(401, "Entre com o e-mail do grupo para continuar.");
+  return g;
+}
+// Membros (perfil "membro") entram só escolhendo o nome; administradores e gestores confirmam com a própria senha.
+const needsPassword = m => m.role !== "membro";
+router.get("/api/group-login", async (ctx) => {
+  const g = groupFromCookie(ctx);
+  const company = one("SELECT name FROM companies WHERE id = ?", g.company_id);
+  send(ctx.res, 200, { group: { name: g.name, address: g.address }, company: company.name,
+    members: groups.members(g.user_id).map(m => ({ id: m.id, name: m.name, regra: m.regra, needsPassword: needsPassword(m), canUsePassword: m.has_password })) });
+});
+router.post("/api/group-login/choose", async (ctx) => {
+  const g = groupFromCookie(ctx);
+  throttle("choose:" + ip(ctx.req), 20);
+  const m = groups.members(g.user_id).find(x => x.id === Number(ctx.body.user_id));
+  if (!m) throw new HttpError(404, "Pessoa não encontrada no grupo.");
+  if (needsPassword(m)) {
+    const u = one("SELECT password_hash FROM users WHERE id = ?", m.id);
+    if (!u.password_hash) throw new HttpError(403, "Administradores e gestores entram com a própria senha. Use o convite para criar a sua.");
+    if (!sec.verifyPassword(String(ctx.body.senha || ""), u.password_hash)) throw new HttpError(401, "Senha incorreta.");
+  }
+  sec.destroySession(ctx.cookies.genco_sess);
+  send(ctx.res, 200, { ok: true, grupo: g.user_id }, { "Set-Cookie": sec.sessionCookie(sec.createSession(m.id)) });
 });
 
 router.get("/api/invite/:token", async ({ res, params }) => {
@@ -100,7 +137,9 @@ router.get("/api/state", async (ctx) => {
   const acc = mail.account(box.id);
   const rules = agent.boxRules(company, box);
   const boxKey = box.group ? box.id : null;
+  const gl = (gid => { const g = gid && groups.byBox(gid); return g && g.company_id === company.id && groups.isMember(g.user_id, user.id) ? { id: g.user_id, name: g.name } : null; })(sec.groupSession(ctx.cookies.genco_grp));
   send(ctx.res, 200, {
+    groupLogin: gl,
     me: publicUser(user),
     company: { name: company.name, sector: company.sector, sectorName: (SECTORS[company.sector] || SECTORS.geral).nome, access: billing.access(company), seats: billing.seats(company.id), hasSubscription: !!company.stripe_subscription_id },
     features: { ...config.features, ai: ai.name() },
@@ -142,7 +181,7 @@ router.post("/api/sync", async (ctx) => {
   const r = await mail.sync(box.id, { ai: pdfReader(owner, company) });
   if (r.error) throw new HttpError(502, "Não foi possível ler o e-mail: " + r.error);
   if (r.added.length && config.autoTriage) await agent.autoTriage(owner, company).catch(e => console.error("[triagem]", e.message));
-  send(ctx.res, 200, { added: r.added.length, inbox: mail.inbox(box.id) });
+  send(ctx.res, 200, { added: r.added.length, newPeople: r.newPeople || [], inbox: mail.inbox(box.id) });
 });
 
 router.put("/api/drafts/:id", async (ctx) => {
@@ -168,7 +207,7 @@ router.get("/api/connect/:provider", async (ctx) => {
   const state = sec.randomToken(24);
   run("DELETE FROM oauth_states WHERE created_at < ?", now() - 15 * 60e3);
   run("INSERT INTO oauth_states (state, user_id, provider, created_at) VALUES (?, ?, ?, ?)", state, target.id, p, now());
-  redirect(ctx.res, mail.PROVIDERS[p].authUrl(state));
+  redirect(ctx.res, mail.PROVIDERS[p].authUrl(state, { group: target.id !== user.id }));
 });
 router.get("/oauth/:provider/callback", async (ctx) => {
   const p = ctx.params.provider, q = ctx.query;
@@ -319,6 +358,10 @@ router.put("/api/groups/:id/members", async (ctx) => {
   const { user } = auth(ctx);
   const g = groupOf(ctx, user, { manage: true });
   groups.setMembers(g, Array.isArray(ctx.body.membros) ? ctx.body.membros : []);
+  // Com as funções novas, a IA requalifica o que ainda está sem dono e já divide entre as pessoas.
+  groups.requalifyUnassigned(g);
+  const company = one("SELECT * FROM companies WHERE id = ?", g.company_id);
+  if (config.autoTriage && billing.access(company).ok) await agent.autoTriage(boxUser(g), company).catch(e => console.error("[triagem]", e.message));
   send(ctx.res, 200, { members: groups.members(g.user_id) });
 });
 router.post("/api/groups/:id/connect/demo", async (ctx) => {
@@ -328,6 +371,26 @@ router.post("/api/groups/:id/connect/demo", async (ctx) => {
   await mail.sync(g.user_id);
   if (config.autoTriage && billing.access(company).ok) await agent.autoTriage(boxUser(g), company).catch(e => console.error("[triagem]", e.message));
   send(ctx.res, 200, { ok: true });
+});
+// Senha de acesso pelo e-mail do grupo (vazia = desliga).
+router.put("/api/groups/:id/access", async (ctx) => {
+  const { user } = auth(ctx);
+  const g = groupOf(ctx, user, { manage: true });
+  const senha = String(ctx.body.senha || "");
+  if (senha && !g.address) throw new HttpError(400, "Informe primeiro o endereço do grupo (ex.: operacional@empresa.com.br).");
+  if (senha && senha.length < 8) throw new HttpError(400, "A senha do grupo precisa ter pelo menos 8 caracteres.");
+  if (senha && one("SELECT 1 FROM users WHERE email = ? AND kind = 'pessoa'", String(g.address).toLowerCase())) throw new HttpError(409, "Já existe uma pessoa com o e-mail do grupo como login.");
+  groups.setPassword(g, senha);
+  send(ctx.res, 200, { groupLogin: !!senha });
+});
+// Busca agora as pessoas do grupo (Google Grupos e respostas da equipe).
+router.post("/api/groups/:id/detect", async (ctx) => {
+  const { user } = auth(ctx);
+  const g = groupOf(ctx, user, { manage: true });
+  const acc = mail.account(g.user_id);
+  if (!acc) throw new HttpError(400, "Conecte primeiro o e-mail do grupo.");
+  const r = await mail.sync(g.user_id);
+  send(ctx.res, 200, { added: r.newPeople || [], members: groups.members(g.user_id) });
 });
 router.delete("/api/groups/:id/connect", async (ctx) => {
   const { user } = auth(ctx);

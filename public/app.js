@@ -298,7 +298,8 @@
   async function refresh() {
     try { S = await api("GET", "/api/state" + boxQ()); }
     catch (e) { if (e.status === 404 && box) { box = null; S = await api("GET", "/api/state"); } else throw e; }
-    $("who").textContent = `${S.me.name} · ${S.company.name}`;
+    $("who").textContent = S.groupLogin ? `${S.me.name} · Grupo ${S.groupLogin.name}` : `${S.me.name} · ${S.company.name}`;
+    $("bSwap").hidden = !S.groupLogin;
     document.querySelector('#nav [data-view="equipe"]').hidden = !canRules();
     document.querySelector('#nav [data-view="grupos"]').hidden = !(S.groups.length || canRules());
     $("boxSel").innerHTML = `<option value="">Minha caixa</option>` + S.groups.map(g => `<option value="${g.id}" ${g.id === box ? "selected" : ""}>Grupo ${esc(g.name)}</option>`).join("");
@@ -307,6 +308,7 @@
 
   $("nav").onclick = ev => { const b = ev.target.closest("[data-view]"); if (b) show(b.dataset.view); };
   $("bLogout").onclick = async () => { try { await api("POST", "/api/logout"); } catch {} location.href = "/"; };
+  $("bSwap").onclick = () => { location.href = "/quem"; };
   $("boxSel").onchange = async () => { box = Number($("boxSel").value) || null; try { await refresh(); } catch (e) { toast(e.message); } };
   $("bNew").onclick = async () => { if (busy) return; try { await api("DELETE", "/api/chat" + boxQ()); S.chat = []; renderChat(); } catch (e) { toast(e.message); } };
   $("send").innerHTML = ICON_SEND;

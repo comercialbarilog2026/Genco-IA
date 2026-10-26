@@ -23,7 +23,7 @@
     form.addEventListener("submit", async ev => {
       ev.preventDefault();
       const btn = form.querySelector("button[type=submit]"); btn.disabled = true; $(errEl).textContent = "";
-      try { await fn(); location.href = "/app"; }
+      try { const d = await fn(); location.href = d && d.grupo ? "/quem" : "/app"; }
       catch (e) { $(errEl).textContent = e.message; btn.disabled = false; }
     });
   }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Quem está usando? · GENCO IA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=Onest:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="top"><div class="top-in"><h1 class="mark"><i></i>GENCO <span>IA</span></h1>
+  <div class="ctl"><button type="button" class="txtbtn" id="bOut">Sair do grupo</button></div></div></header>
+<main class="view"><div class="page quem" id="quem">
+  <div class="brief"><span class="cap" id="qCap">Carregando…</span><h2 class="brief-h">Quem está usando?</h2>
+    <p class="lead">Escolha o seu nome. A GENCO IA abre direto no que está com você.</p></div>
+  <div class="qgrid" id="qGrid"></div>
+  <form class="qpass" id="qPass" hidden>
+    <p id="qPassTxt"></p>
+    <div class="field"><label for="qSenha">Sua senha</label><input id="qSenha" type="password" autocomplete="current-password"></div>
+    <p class="formerr" id="qErr" role="alert"></p>
+    <div class="actions"><button type="submit" class="btn">Entrar</button><button type="button" class="btn ghost" id="qBack">Voltar</button></div>
+  </form>
+  <p class="formerr" id="qErr2" role="alert"></p>
+</div></main>
+<script src="/quem.js"></script>
+</body>
+</html>

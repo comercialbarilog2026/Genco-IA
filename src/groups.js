@@ -14,8 +14,8 @@ const canSee = (user, g) => !!g && (user.role === "admin" || user.role === "gest
 const canManage = user => user.role === "admin" || user.role === "gestor";
 
 function members(groupId) {
-  return all(`SELECT u.id, u.name, u.email, gm.regra, gm.coordena FROM group_members gm JOIN users u ON u.id = gm.user_id
-              WHERE gm.group_id = ? ORDER BY gm.coordena DESC, u.name`, groupId).map(m => ({ ...m, coordena: !!m.coordena }));
+  return all(`SELECT u.id, u.name, u.email, u.role, gm.regra, gm.coordena, gm.origem, u.password_hash IS NOT NULL AS has_password FROM group_members gm JOIN users u ON u.id = gm.user_id
+              WHERE gm.group_id = ? ORDER BY gm.coordena DESC, u.name`, groupId).map(m => ({ ...m, coordena: !!m.coordena, has_password: !!m.has_password }));
 }
 
 function list(user) {
@@ -24,7 +24,36 @@ function list(user) {
     : all("SELECT g.*, u.name FROM groups g JOIN users u ON u.id = g.user_id JOIN group_members gm ON gm.group_id = g.user_id WHERE gm.user_id = ? ORDER BY u.name", user.id);
   return rows.map(publicGroup);
 }
-const publicGroup = g => ({ id: g.user_id, name: g.name, address: g.address || "", filtro: g.filtro || "", autoAtribuir: !!g.auto_atribuir });
+const publicGroup = g => ({ id: g.user_id, name: g.name, address: g.address || "", filtro: g.filtro || "", autoAtribuir: !!g.auto_atribuir, groupLogin: !!g.password_hash });
+
+// Nome legível a partir do e-mail: "ana.souza@empresa" -> "Ana Souza".
+const nameFromEmail = e => String(e).split("@")[0].split(/[._-]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(" ") || e;
+
+// Membros encontrados automaticamente (Google ou e-mails do grupo): cria a pessoa na empresa se ainda
+// não existir e inclui no grupo. Nunca remove ninguém nem muda a função de quem já está.
+function addDetected(g, found, origem) {
+  const added = [];
+  const groupAddr = String(g.address || "").toLowerCase();
+  for (const f of found) {
+    const email = String(f.email || "").trim().toLowerCase();
+    if (!email.includes("@") || email === groupAddr || email.endsWith("@caixa.genco-ia")) continue;
+    if (one("SELECT 1 FROM group_excluded WHERE group_id = ? AND email = ?", g.user_id, email)) continue;
+    let u = one("SELECT * FROM users WHERE email = ?", email);
+    if (u && u.company_id !== g.company_id) continue; // pertence a outra empresa
+    if (!u) {
+      const r = run("INSERT INTO users (company_id, name, email, password_hash, role, kind, created_at) VALUES (?, ?, ?, NULL, 'membro', 'pessoa', ?)",
+        g.company_id, String(f.name || "").trim() || nameFromEmail(email), email, now());
+      u = { id: Number(r.lastInsertRowid), name: String(f.name || "").trim() || nameFromEmail(email) };
+    }
+    if (u.kind === "grupo") continue;
+    const ins = run("INSERT OR IGNORE INTO group_members (group_id, user_id, regra, coordena, origem) VALUES (?, ?, '', 0, ?)", g.user_id, u.id, origem);
+    if (ins.changes) added.push(u.name);
+  }
+  return added;
+}
+
+const setPassword = (g, senha) => run("UPDATE groups SET password_hash = ? WHERE user_id = ?", senha ? sec.hashPassword(senha) : null, g.user_id);
+const byAddress = email => one(`SELECT g.*, u.name FROM groups g JOIN users u ON u.id = g.user_id WHERE lower(g.address) = ? AND g.password_hash IS NOT NULL`, String(email).toLowerCase());
 
 function create(company, { nome, endereco, filtro }) {
   const u = run("INSERT INTO users (company_id, name, email, password_hash, role, kind, created_at) VALUES (?, ?, ?, NULL, 'membro', 'grupo', ?)",
@@ -49,11 +78,16 @@ function remove(g) {
 
 function setMembers(g, list) {
   const valid = new Set(all("SELECT id FROM users WHERE company_id = ? AND kind = 'pessoa'", g.company_id).map(r => r.id));
+  const before = new Map(members(g.user_id).map(m => [m.id, m]));
+  const keep = new Set(list.map(m => Number(m.user_id)));
+  for (const [id, m] of before) if (!keep.has(id)) run("INSERT OR IGNORE INTO group_excluded (group_id, email) VALUES (?, ?)", g.user_id, m.email.toLowerCase());
   run("DELETE FROM group_members WHERE group_id = ?", g.user_id);
   for (const m of list) {
     const id = Number(m.user_id);
     if (!valid.has(id)) continue;
-    run("INSERT OR IGNORE INTO group_members (group_id, user_id, regra, coordena) VALUES (?, ?, ?, ?)", g.user_id, id, String(m.regra || "").slice(0, 400), m.coordena ? 1 : 0);
+    const u = one("SELECT email FROM users WHERE id = ?", id);
+    run("DELETE FROM group_excluded WHERE group_id = ? AND email = ?", g.user_id, u.email.toLowerCase());
+    run("INSERT OR IGNORE INTO group_members (group_id, user_id, regra, coordena, origem) VALUES (?, ?, ?, ?, ?)", g.user_id, id, String(m.regra || "").slice(0, 400), m.coordena ? 1 : 0, before.get(id)?.origem || "manual");
   }
 }
 
@@ -120,7 +154,8 @@ function history(g, messageId) {
 // Depois da qualificação: e-mails sem dono recebem o responsável sugerido pela IA, se ele for membro.
 function autoAssign(g) {
   if (!g.auto_atribuir) return [];
-  const byName = new Map(members(g.user_id).map(m => [m.name.trim().toLowerCase(), m.id]));
+  // Só atribui a quem já tem função definida; sem função, o e-mail fica "sem dono" para a equipe decidir.
+  const byName = new Map(members(g.user_id).filter(m => String(m.regra || "").trim()).map(m => [m.name.trim().toLowerCase(), m.id]));
   const rows = all(`SELECT t.message_id, t.responsavel FROM triage t
                     LEFT JOIN handling h ON h.box_id = t.user_id AND h.message_id = t.message_id
                     JOIN messages m ON m.user_id = t.user_id AND m.id = t.message_id
@@ -162,5 +197,12 @@ function overview(g, inbox, isLate) {
   };
 }
 
-module.exports = { STATUS, OPEN, get, byBox, list, publicGroup, create, update, remove, members, setMembers, rulesFor, canSee, canManage, isMember,
+// Funções mudaram: os e-mails ainda sem dono voltam para a fila de qualificação da IA.
+function requalifyUnassigned(g) {
+  run(`DELETE FROM triage WHERE user_id = ? AND message_id IN (
+         SELECT m.id FROM messages m LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id
+         WHERE m.user_id = ? AND h.assignee_id IS NULL AND m.replied = 0 AND COALESCE(h.status, 'novo') = 'novo')`, g.user_id, g.user_id);
+}
+
+module.exports = { requalifyUnassigned, STATUS, OPEN, get, byBox, list, publicGroup, addDetected, setPassword, byAddress, nameFromEmail, create, update, remove, members, setMembers, rulesFor, canSee, canManage, isMember,
   handlingOf, setHandling, addNote, history, autoAssign, overview, effective, isOpen };

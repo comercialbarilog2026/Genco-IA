@@ -6,7 +6,7 @@ const BAIXA = /(boletim|informativo|newsletter|tend[êe]ncias|obrigad[oa] pela)/
 
 function pickOwner(msg, team) {
   const txt = (msg.subject + " " + msg.body).toLowerCase();
-  let best = team[0]?.nome || "", score = 0;
+  let best = "", score = 0; // sem palavra em comum com a função de ninguém = sem sugestão
   for (const m of team) {
     const words = String(m.regra).toLowerCase().split(/[^a-zà-ú0-9]+/).filter(w => w.length > 4);
     const s = words.filter(w => txt.includes(w)).length;
