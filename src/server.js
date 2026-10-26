@@ -9,6 +9,7 @@ const billing = require("./billing");
 const mail = require("./mail");
 const ai = require("./ai");
 const agent = require("./agent");
+const groups = require("./groups");
 const { SECTORS, defaultRules } = require("./templates");
 
 const router = createRouter();
@@ -36,7 +37,19 @@ function throttle(key, max = 8, windowMs = 15 * 60e3) {
 }
 const ip = req => (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
 const publicUser = u => ({ id: u.id, name: u.name, email: u.email, role: u.role });
-const pdfReader = (user, company) => ({ extractPdf: b => ai.extractPdf(b, { companyId: company.id, userId: user.id }) });
+const pdfReader = (user, company) => ({ extractPdf: b => ai.extractPdf(b, { companyId: company.id, userId: user.kind === "grupo" ? null : user.id }) });
+// Caixa da requisição: ?grupo=ID (ou "grupo" no corpo) usa a caixa do grupo; senão, a pessoal.
+function boxOf(ctx, user) {
+  const gid = ctx.query.grupo || ctx.body?.grupo;
+  try { return agent.boxFor(user, gid ? Number(gid) : null); } catch { throw new HttpError(404, "Grupo não encontrado ou você não faz parte dele."); }
+}
+function groupOf(ctx, user, { manage = false } = {}) {
+  const g = groups.get(user.company_id, Number(ctx.params.id));
+  if (!groups.canSee(user, g)) throw new HttpError(404, "Grupo não encontrado ou você não faz parte dele.");
+  if (manage && !groups.canManage(user)) throw new HttpError(403, "Só administradores e gestores podem configurar grupos.");
+  return g;
+}
+const boxUser = g => one("SELECT * FROM users WHERE id = ?", g.user_id);
 
 // ---------- cadastro e login ----------
 router.post("/api/signup", async ({ req, res, body }) => {
@@ -56,7 +69,7 @@ router.post("/api/signup", async ({ req, res, body }) => {
 router.post("/api/login", async ({ req, res, body }) => {
   const email = String(body.email || "").trim().toLowerCase();
   throttle("login:" + ip(req) + ":" + email);
-  const u = one("SELECT * FROM users WHERE email = ?", email);
+  const u = one("SELECT * FROM users WHERE email = ? AND kind = 'pessoa'", email);
   if (!u || !sec.verifyPassword(String(body.senha || ""), u.password_hash)) throw new HttpError(401, "E-mail ou senha incorretos.");
   send(res, 200, { ok: true }, { "Set-Cookie": sec.sessionCookie(sec.createSession(u.id)) });
 });
@@ -83,15 +96,20 @@ router.post("/api/invite/accept", async ({ req, res, body }) => {
 // ---------- estado do app ----------
 router.get("/api/state", async (ctx) => {
   const { user, company } = auth(ctx);
-  const acc = mail.account(user.id);
-  const rules = agent.rulesOf(company);
+  const box = boxOf(ctx, user);
+  const acc = mail.account(box.id);
+  const rules = agent.boxRules(company, box);
+  const boxKey = box.group ? box.id : null;
   send(ctx.res, 200, {
     me: publicUser(user),
     company: { name: company.name, sector: company.sector, sectorName: (SECTORS[company.sector] || SECTORS.geral).nome, access: billing.access(company), seats: billing.seats(company.id), hasSubscription: !!company.stripe_subscription_id },
     features: { ...config.features, ai: ai.name() },
     account: acc ? { provider: acc.provider, address: acc.address, demoSector: acc.demo_sector, lastSync: acc.last_sync_at, error: acc.last_error } : null,
-    inbox: mail.inbox(user.id),
-    chat: all("SELECT role, text, cards_json, error, created_at FROM chats WHERE user_id = ? ORDER BY id DESC LIMIT 60", user.id).reverse().map(r => ({ role: r.role, text: r.text, cards: json(r.cards_json, []), error: r.error })),
+    myAccount: (a => a ? { provider: a.provider, address: a.address, demoSector: a.demo_sector, lastSync: a.last_sync_at, error: a.last_error } : null)(mail.account(user.id)),
+    inbox: mail.inbox(box.id),
+    groups: groups.list(user),
+    box: box.group ? { ...groups.publicGroup(box.group), members: groups.members(box.id).map(m => ({ id: m.id, name: m.name })) } : null,
+    chat: all("SELECT role, text, cards_json, error, created_at FROM chats WHERE user_id = ? AND box_id IS ? ORDER BY id DESC LIMIT 60", user.id, boxKey).reverse().map(r => ({ role: r.role, text: r.text, cards: json(r.cards_json, []), error: r.error })),
     rules, sectors: Object.fromEntries(Object.entries(SECTORS).map(([k, s]) => [k, s.nome])),
     usage: { month: ai.monthlyCount(user.id), limit: config.ai.monthlyLimitPerUser }
   });
@@ -103,38 +121,53 @@ router.post("/api/chat", async (ctx) => {
   requireAccess(company);
   const text = String(ctx.body.texto || "").trim().slice(0, 4000);
   if (!text) throw new HttpError(400, "Escreva uma mensagem.");
-  if (!mail.account(user.id)) throw new HttpError(400, "Conecte um e-mail antes de conversar com a GENCO IA.");
+  const box = boxOf(ctx, user);
+  if (!mail.account(box.id)) throw new HttpError(400, box.group ? "O e-mail deste grupo ainda não foi conectado." : "Conecte um e-mail antes de conversar com a GENCO IA.");
   if (ai.monthlyCount(user.id) >= config.ai.monthlyLimitPerUser) throw new HttpError(429, "Você atingiu o limite de mensagens do mês no seu plano.");
-  if (!mail.inbox(user.id, 1).length) await mail.sync(user.id, { ai: pdfReader(user, company) });
-  const r = await agent.chat(user, company, text);
-  send(ctx.res, 200, { reply: r, inbox: mail.inbox(user.id), rules: agent.rulesOf(one("SELECT * FROM companies WHERE id = ?", company.id)) });
+  if (!mail.inbox(box.id, 1).length) await mail.sync(box.id, { ai: pdfReader(box.group ? boxUser(box.group) : user, company) });
+  const r = await agent.chat(user, company, text, box);
+  send(ctx.res, 200, { reply: r, inbox: mail.inbox(box.id), rules: agent.boxRules(one("SELECT * FROM companies WHERE id = ?", company.id), box) });
 });
-router.delete("/api/chat", async (ctx) => { const { user } = auth(ctx); run("DELETE FROM chats WHERE user_id = ?", user.id); send(ctx.res, 200, { ok: true }); });
+router.delete("/api/chat", async (ctx) => {
+  const { user } = auth(ctx); const box = boxOf(ctx, user);
+  run("DELETE FROM chats WHERE user_id = ? AND box_id IS ?", user.id, box.group ? box.id : null);
+  send(ctx.res, 200, { ok: true });
+});
 
 router.post("/api/sync", async (ctx) => {
   const { user, company } = auth(ctx);
   requireAccess(company);
-  const r = await mail.sync(user.id, { ai: pdfReader(user, company) });
+  const box = boxOf(ctx, user);
+  const owner = box.group ? boxUser(box.group) : user;
+  const r = await mail.sync(box.id, { ai: pdfReader(owner, company) });
   if (r.error) throw new HttpError(502, "Não foi possível ler o e-mail: " + r.error);
-  send(ctx.res, 200, { added: r.added.length, inbox: mail.inbox(user.id) });
+  if (r.added.length && config.autoTriage) await agent.autoTriage(owner, company).catch(e => console.error("[triagem]", e.message));
+  send(ctx.res, 200, { added: r.added.length, inbox: mail.inbox(box.id) });
 });
 
 router.put("/api/drafts/:id", async (ctx) => {
   const { user, company } = auth(ctx);
   requireAccess(company);
-  const r = await mail.saveDraft(user.id, ctx.params.id, { assunto: String(ctx.body.assunto || ""), corpo: String(ctx.body.corpo || "") });
+  const box = boxOf(ctx, user);
+  const r = await mail.saveDraft(box.id, ctx.params.id, { assunto: String(ctx.body.assunto || ""), corpo: String(ctx.body.corpo || "") });
   send(ctx.res, 200, r);
 });
 
 // ---------- conexão de e-mail ----------
 router.get("/api/connect/:provider", async (ctx) => {
   const { user } = auth(ctx);
+  let target = user;
+  if (ctx.query.grupo) {
+    const box = boxOf(ctx, user);
+    if (!groups.canManage(user)) throw new HttpError(403, "Só administradores e gestores conectam o e-mail do grupo.");
+    target = boxUser(box.group);
+  }
   const p = ctx.params.provider;
   if (!mail.PROVIDERS[p]) throw new HttpError(404, "Provedor desconhecido.");
   if (!config.features[p]) throw new HttpError(503, p === "gmail" ? "Conexão com Gmail ainda não configurada (GOOGLE_CLIENT_ID)." : "Conexão com Outlook ainda não configurada (MICROSOFT_CLIENT_ID).");
   const state = sec.randomToken(24);
   run("DELETE FROM oauth_states WHERE created_at < ?", now() - 15 * 60e3);
-  run("INSERT INTO oauth_states (state, user_id, provider, created_at) VALUES (?, ?, ?, ?)", state, user.id, p, now());
+  run("INSERT INTO oauth_states (state, user_id, provider, created_at) VALUES (?, ?, ?, ?)", state, target.id, p, now());
   redirect(ctx.res, mail.PROVIDERS[p].authUrl(state));
 });
 router.get("/oauth/:provider/callback", async (ctx) => {
@@ -142,16 +175,18 @@ router.get("/oauth/:provider/callback", async (ctx) => {
   const st = one("SELECT * FROM oauth_states WHERE state = ? AND provider = ?", String(q.state || ""), p);
   if (!st || now() - st.created_at > 15 * 60e3) return redirect(ctx.res, "/app?conexao=expirada");
   run("DELETE FROM oauth_states WHERE state = ?", st.state);
-  if (q.error || !q.code) return redirect(ctx.res, "/app?conexao=cancelada");
+  const owner = one("SELECT * FROM users WHERE id = ?", st.user_id);
+  const back = owner?.kind === "grupo" ? `&grupo=${owner.id}` : "";
+  if (q.error || !q.code) return redirect(ctx.res, "/app?conexao=cancelada" + back);
   try {
     const t = await mail.PROVIDERS[p].exchange(String(q.code));
     mail.saveAccount(st.user_id, p, t);
     const user = one("SELECT * FROM users WHERE id = ?", st.user_id), company = one("SELECT * FROM companies WHERE id = ?", user.company_id);
     mail.sync(user.id, { ai: pdfReader(user, company) }).then(r => r.added.length && config.autoTriage && billing.access(company).ok && agent.autoTriage(user, company)).catch(e => console.error("[sync]", e.message));
-    redirect(ctx.res, "/app?conexao=ok");
+    redirect(ctx.res, "/app?conexao=ok" + back);
   } catch (e) {
     console.error("[oauth]", e.message);
-    redirect(ctx.res, "/app?conexao=erro");
+    redirect(ctx.res, "/app?conexao=erro" + back);
   }
 });
 router.post("/api/connect/demo", async (ctx) => {
@@ -178,7 +213,7 @@ router.put("/api/rules", async (ctx) => {
 router.get("/api/users", async (ctx) => {
   const { user, company } = auth(ctx);
   requireRole(user, "admin");
-  send(ctx.res, 200, { users: all("SELECT id, name, email, role, invite_token IS NOT NULL AS pending FROM users WHERE company_id = ? ORDER BY id", company.id) });
+  send(ctx.res, 200, { users: all("SELECT id, name, email, role, invite_token IS NOT NULL AS pending FROM users WHERE company_id = ? AND kind = 'pessoa' ORDER BY id", company.id) });
 });
 router.post("/api/users", async (ctx) => {
   const { user, company } = auth(ctx);
@@ -198,14 +233,14 @@ router.put("/api/users/:id", async (ctx) => {
   const role = ["admin", "gestor", "membro"].includes(ctx.body.role) ? ctx.body.role : null;
   if (!role) throw new HttpError(400, "Perfil inválido.");
   if (Number(ctx.params.id) === user.id && role !== "admin") throw new HttpError(400, "Você não pode tirar o seu próprio perfil de administrador.");
-  run("UPDATE users SET role = ? WHERE id = ? AND company_id = ?", role, Number(ctx.params.id), company.id);
+  run("UPDATE users SET role = ? WHERE id = ? AND company_id = ? AND kind = 'pessoa'", role, Number(ctx.params.id), company.id);
   send(ctx.res, 200, { ok: true });
 });
 router.delete("/api/users/:id", async (ctx) => {
   const { user, company } = auth(ctx);
   requireRole(user, "admin");
   if (Number(ctx.params.id) === user.id) throw new HttpError(400, "Você não pode remover a própria conta.");
-  run("DELETE FROM users WHERE id = ? AND company_id = ?", Number(ctx.params.id), company.id);
+  run("DELETE FROM users WHERE id = ? AND company_id = ? AND kind = 'pessoa'", Number(ctx.params.id), company.id);
   billing.syncSeats(company.id);
   send(ctx.res, 200, { ok: true });
 });
@@ -215,13 +250,117 @@ router.get("/api/team/overview", async (ctx) => {
   const { user, company } = auth(ctx);
   requireRole(user, "admin", "gestor");
   const rules = agent.rulesOf(company);
-  const people = all("SELECT id, name, email, role, invite_token IS NOT NULL AS pending FROM users WHERE company_id = ? ORDER BY name", company.id).map(p => {
+  const people = all("SELECT id, name, email, role, invite_token IS NOT NULL AS pending FROM users WHERE company_id = ? AND kind = 'pessoa' ORDER BY name", company.id).map(p => {
     const acc = mail.account(p.id), box = acc ? mail.inbox(p.id, 200) : [];
     return { name: p.name, email: p.email, role: p.role, pending: !!p.pending, connected: acc ? (acc.provider === "demo" ? "demonstração" : acc.provider) : null, lastSync: acc?.last_sync_at || null,
       total: box.length, late: box.filter(m => agent.isLate(m, rules)).length, urgent: box.filter(m => m.triage?.prioridade === "urgente" && !m.replied).length,
       drafts: box.filter(m => m.draft).length, untriaged: box.filter(m => !m.triage).length };
   });
-  send(ctx.res, 200, { people, atraso: rules.atraso });
+  const groupStats = groups.list(user).map(gp => {
+    const g = groups.get(company.id, gp.id), r = groups.rulesFor(g, rules), box = mail.inbox(g.user_id, 200);
+    const o = groups.overview(g, box, m => agent.isLate(m, r));
+    return { id: gp.id, name: gp.name, address: gp.address, connected: !!mail.account(g.user_id), abertos: o.abertos, semDono: o.semDono, atrasados: o.atrasados, urgentes: o.urgentes, resolvidos7d: o.resolvidos7d };
+  });
+  send(ctx.res, 200, { people, groups: groupStats, atraso: rules.atraso });
+});
+
+// ---------- grupos de e-mail (caixas compartilhadas) ----------
+const cleanGroupInput = b => ({
+  nome: b.nome != null ? String(b.nome).trim().slice(0, 80) : undefined,
+  endereco: b.endereco != null ? String(b.endereco).trim().toLowerCase().slice(0, 160) : undefined,
+  filtro: b.filtro != null ? String(b.filtro).trim().slice(0, 400) : undefined,
+  autoAtribuir: b.autoAtribuir != null ? !!b.autoAtribuir : undefined
+});
+router.get("/api/people", async (ctx) => {
+  const { user, company } = auth(ctx);
+  if (!groups.canManage(user)) throw new HttpError(403, "Seu perfil não tem permissão para isso.");
+  send(ctx.res, 200, { people: all("SELECT id, name, email FROM users WHERE company_id = ? AND kind = 'pessoa' ORDER BY name", company.id) });
+});
+router.get("/api/groups", async (ctx) => { const { user } = auth(ctx); send(ctx.res, 200, { groups: groups.list(user) }); });
+router.post("/api/groups", async (ctx) => {
+  const { user, company } = auth(ctx);
+  if (!groups.canManage(user)) throw new HttpError(403, "Só administradores e gestores criam grupos.");
+  const b = cleanGroupInput(ctx.body);
+  if (!b.nome) throw new HttpError(400, "Dê um nome ao grupo (ex.: Operacional).");
+  if (b.endereco && !EMAIL_RE.test(b.endereco)) throw new HttpError(400, "Endereço do grupo inválido.");
+  const g = groups.create(company, b);
+  if (Array.isArray(ctx.body.membros)) groups.setMembers(g, ctx.body.membros);
+  send(ctx.res, 201, { group: groups.publicGroup(g) });
+});
+router.get("/api/groups/:id", async (ctx) => {
+  const { user, company } = auth(ctx);
+  const g = groupOf(ctx, user);
+  const rules = groups.rulesFor(g, agent.rulesOf(company));
+  const inbox = mail.inbox(g.user_id, 200);
+  const acc = mail.account(g.user_id);
+  send(ctx.res, 200, {
+    group: groups.publicGroup(g), canManage: groups.canManage(user), isMember: groups.isMember(g.user_id, user.id),
+    members: groups.members(g.user_id), statuses: groups.STATUS,
+    account: acc ? { provider: acc.provider, address: acc.address, lastSync: acc.last_sync_at, error: acc.last_error } : null,
+    inbox, overview: groups.overview(g, inbox, m => agent.isLate(m, rules)), atraso: rules.atraso, team: rules.team
+  });
+});
+router.put("/api/groups/:id", async (ctx) => {
+  const { user } = auth(ctx);
+  const g = groupOf(ctx, user, { manage: true });
+  const b = cleanGroupInput(ctx.body);
+  if (b.nome === "") throw new HttpError(400, "O grupo precisa de um nome.");
+  if (b.endereco && !EMAIL_RE.test(b.endereco)) throw new HttpError(400, "Endereço do grupo inválido.");
+  groups.update(g, b);
+  send(ctx.res, 200, { group: groups.publicGroup(groups.get(user.company_id, g.user_id)) });
+});
+router.delete("/api/groups/:id", async (ctx) => {
+  const { user } = auth(ctx);
+  requireRole(user, "admin");
+  groups.remove(groupOf(ctx, user, { manage: true }));
+  send(ctx.res, 200, { ok: true });
+});
+router.put("/api/groups/:id/members", async (ctx) => {
+  const { user } = auth(ctx);
+  const g = groupOf(ctx, user, { manage: true });
+  groups.setMembers(g, Array.isArray(ctx.body.membros) ? ctx.body.membros : []);
+  send(ctx.res, 200, { members: groups.members(g.user_id) });
+});
+router.post("/api/groups/:id/connect/demo", async (ctx) => {
+  const { user, company } = auth(ctx);
+  const g = groupOf(ctx, user, { manage: true });
+  mail.saveAccount(g.user_id, "demo", { address: "caixa de demonstração" }, { demoSector: SECTORS[ctx.body.setor] ? ctx.body.setor : company.sector });
+  await mail.sync(g.user_id);
+  if (config.autoTriage && billing.access(company).ok) await agent.autoTriage(boxUser(g), company).catch(e => console.error("[triagem]", e.message));
+  send(ctx.res, 200, { ok: true });
+});
+router.delete("/api/groups/:id/connect", async (ctx) => {
+  const { user } = auth(ctx);
+  mail.disconnect(groupOf(ctx, user, { manage: true }).user_id);
+  send(ctx.res, 200, { ok: true });
+});
+// Atendimento: assumir, passar para alguém, mudar situação (um ou vários e-mails).
+router.post("/api/groups/:id/handling", async (ctx) => {
+  const { user, company } = auth(ctx);
+  requireAccess(company);
+  const g = groupOf(ctx, user);
+  const ids = (Array.isArray(ctx.body.ids) ? ctx.body.ids : [ctx.body.id]).filter(Boolean).map(String).slice(0, 200);
+  const patch = {};
+  if ("dono" in ctx.body) patch.assigneeId = ctx.body.dono === "eu" ? user.id : (ctx.body.dono ? Number(ctx.body.dono) : null);
+  if ("situacao" in ctx.body) patch.status = String(ctx.body.situacao);
+  let changed;
+  try { changed = groups.setHandling(g, ids, patch, user.id); } catch (e) { throw new HttpError(400, e.message); }
+  if ("assigneeId" in patch) mail.labelMessages(g.user_id, changed);
+  send(ctx.res, 200, { changed: changed.length, inbox: mail.inbox(g.user_id, 200) });
+});
+router.get("/api/groups/:id/messages/:mid", async (ctx) => {
+  const { user } = auth(ctx);
+  const g = groupOf(ctx, user);
+  send(ctx.res, 200, { history: groups.history(g, ctx.params.mid) });
+});
+router.post("/api/groups/:id/messages/:mid/notes", async (ctx) => {
+  const { user, company } = auth(ctx);
+  requireAccess(company);
+  const g = groupOf(ctx, user);
+  const texto = String(ctx.body.texto || "").trim();
+  if (!texto) throw new HttpError(400, "Escreva a nota.");
+  try { groups.addNote(g, ctx.params.mid, user.id, texto); } catch (e) { throw new HttpError(404, e.message); }
+  send(ctx.res, 201, { history: groups.history(g, ctx.params.mid) });
 });
 
 // ---------- assinatura ----------

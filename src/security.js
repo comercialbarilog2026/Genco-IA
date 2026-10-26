@@ -46,7 +46,7 @@ function createSession(userId) {
 }
 function sessionUser(token) {
   if (!token) return null;
-  const row = one(`SELECT u.*, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`, sha(token));
+  const row = one(`SELECT u.*, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND u.kind = 'pessoa'`, sha(token));
   if (!row || row.expires_at < now()) return null;
   return row;
 }

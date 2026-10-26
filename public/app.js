@@ -3,7 +3,9 @@
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PRI = ["urgente", "alta", "normal", "baixa"];
-  let S = null, busy = false, view = "conversa";
+  const STATUS_TXT = { novo: "Novo", andamento: "Em andamento", aguardando: "Aguardando terceiros", resolvido: "Resolvido" };
+  let S = null, busy = false, view = "conversa", box = null; // box = id do grupo em uso na conversa (null = caixa pessoal)
+  const boxQ = () => box ? "?grupo=" + box : "";
 
   async function api(method, url, body) {
     const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -17,7 +19,7 @@
   const NOW = () => Date.now();
   const hrs = m => (NOW() - m.received_at) / 36e5;
   const ago = m => { const h = hrs(m); if (h < 1) return Math.max(1, Math.round(h * 60)) + " min"; if (h < 24) return Math.round(h) + " h"; return Math.floor(h / 24) + " d " + Math.round(h % 24) + " h"; };
-  const late = m => !m.replied && hrs(m) >= Number(S.rules.atraso || 4);
+  const late = m => !m.replied && m.handling?.status !== "resolvido" && hrs(m) >= Number(S.rules.atraso || 4);
   const byId = id => S.inbox.find(m => m.id === id);
   const initials = s => String(s || "?").replace(/\(.*?\)/g, "").trim().split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
   const canRules = () => ["admin", "gestor"].includes(S.me.role);
@@ -40,7 +42,8 @@
     const m = byId(id); if (!m) return "";
     const r = m.triage || {}, meta = [];
     if (r.prioridade) meta.push(`<span class="prio ${esc(r.prioridade)}"><i></i>${esc(r.prioridade)}</span>`);
-    if (r.responsavel) meta.push(`<span>${esc(r.responsavel)}</span>`);
+    if (S.box) { const h = m.handling || {}; meta.push(h.assignee ? `<span class="owner"><i></i>${esc(h.assignee)}</span>` : m.replied || r.prioridade === "baixa" ? "" : `<span class="noowner">sem dono${r.responsavel ? " · IA sugere " + esc(r.responsavel) : ""}</span>`); if (h.status && h.status !== "novo") meta.push(`<span class="st ${esc(h.status)}">${esc(STATUS_TXT[h.status] || h.status)}</span>`); if (h.notes) meta.push(`<span>${h.notes} nota${h.notes > 1 ? "s" : ""}</span>`); }
+    else if (r.responsavel) meta.push(`<span>${esc(r.responsavel)}</span>`);
     if (late(m)) meta.push(`<span class="late">sem resposta há ${esc(ago(m))}</span>`); else if (m.replied) meta.push(`<span>respondido</span>`);
     if (r.categoria) meta.push(`<span>${esc(r.categoria)}</span>`);
     if (m.attachments.length) meta.push(`<span>${m.attachments.length} anexo${m.attachments.length > 1 ? "s" : ""}</span>`);
@@ -60,16 +63,16 @@
       <div class="draft-h"><span class="cap">Resposta para ${esc(m.from_name || m.from_addr)}</span><button type="button" class="btn" data-copy="${esc(id)}">Copiar resposta</button></div>
       <input id="ds-${esc(id)}" value="${esc(m.draft.assunto)}" aria-label="Assunto">
       <textarea id="db-${esc(id)}" aria-label="Texto da resposta">${esc(m.draft.corpo)}</textarea>
-      <div class="draft-f"><span id="dst-${esc(id)}">${demo ? "Caixa de demonstração: o rascunho fica só aqui." : m.draft.saved ? '<span class="saved-tag">Salvo como rascunho no seu e-mail</span>' : "Não foi possível salvar no e-mail; copie a resposta."}</span></div></div>`;
+      <div class="draft-f"><span id="dst-${esc(id)}">${demo ? "Caixa de demonstração: o rascunho fica só aqui." : m.draft.saved ? `<span class="saved-tag">Salvo como rascunho ${S.box ? "em " + esc(S.account?.address || "na caixa do grupo") : "no seu e-mail"}</span>` : "Não foi possível salvar no e-mail; copie a resposta."}</span></div></div>`;
   }
   function summaryCard() {
     const tri = S.inbox.filter(m => m.triage); if (!tri.length) return "";
     const c = Object.fromEntries(PRI.map(p => [p, tri.filter(m => m.triage.prioridade === p).length]));
-    const people = S.rules.team.map(t => [t.nome, tri.filter(m => m.triage.responsavel === t.nome && m.triage.prioridade !== "baixa" && !m.replied).length]);
+    const people = S.rules.team.map(t => [t.nome, tri.filter(m => (S.box ? m.handling?.assignee === t.nome && m.handling.status !== "resolvido" : m.triage.responsavel === t.nome) && m.triage.prioridade !== "baixa" && !m.replied).length]);
     const max = Math.max(1, ...people.map(p => p[1]));
     return `<div class="card sum"><span class="cap">Caixa qualificada · ${tri.length} de ${S.inbox.length} e-mails</span>
       <div class="counts">${PRI.map(p => `<div class="${p}"><b>${c[p]}</b><span class="cap">${p}</span></div>`).join("")}</div>
-      <div class="people"><span class="cap">Pendências por responsável</span>${people.map(([n, k]) => `<div class="person"><span>${esc(n)}</span><div class="bar"><i style="width:${Math.round(k / max * 100)}%"></i></div><b>${k}</b></div>`).join("")}</div></div>`;
+      <div class="people"><span class="cap">${S.box ? "Em aberto por dono" : "Pendências por responsável"}</span>${people.map(([n, k]) => `<div class="person"><span>${esc(n)}</span><div class="bar"><i style="width:${Math.round(k / max * 100)}%"></i></div><b>${k}</b></div>`).join("")}</div></div>`;
   }
   function rulesCard() {
     return `<div class="card rules"><span class="cap">Equipe e regras em uso</span><dl>${S.rules.team.map(t => `<div><dt>${esc(t.nome)}</dt><dd>${esc(t.regra)}</dd></div>`).join("")}</dl>
@@ -78,6 +81,7 @@
   const renderCards = cards => (cards || []).map(k => k.t === "mail" ? mailCard(k.id) : k.t === "draft" ? draftCard(k.id) : k.t === "sum" ? summaryCard() : k.t === "rules" ? rulesCard() : "").join("");
 
   // ---------- conversa ----------
+  const TILES_GRUPO = [["O que está sem dono?", "E-mails do grupo que ninguém assumiu"], ["Quais são os meus?", "O que está com você no grupo"], ["Eu assumo os urgentes", "A IA passa os urgentes sem dono para você"], ["O que está atrasado no grupo?", "Clientes esperando além do prazo"]];
   const TILES = [["O que é urgente hoje?", "Prioridades da caixa, com motivo"], ["Quem está sem resposta?", "Clientes esperando além do prazo"], ["Prepare as respostas dos atrasados", "Rascunhos no seu e-mail para revisar"], ["Algum documento com divergência?", "Anexos conferidos entre si"]];
   const greeting = () => { const h = new Date().getHours(); return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"; };
   function connectBlock(title) {
@@ -91,7 +95,18 @@
       </div></section>`;
   }
   function hello() {
+    if (S.box && !S.account) return `<section class="hello"><span class="cap">Grupo ${esc(S.box.name)}</span><h2>O e-mail deste grupo ainda não foi conectado.</h2>
+      <p class="lead">${canRules() ? "Conecte a conta que recebe os e-mails do grupo na tela Grupos." : "Peça ao administrador ou gestor para conectar o e-mail do grupo."}</p>
+      ${canRules() ? `<div class="actions"><button type="button" class="btn" data-goto="grupos">Abrir Grupos</button></div>` : ""}</section>`;
     if (!S.account) return connectBlock(`${greeting()}, ${S.me.name.split(" ")[0]}. Conecte seu e-mail para começar.`);
+    if (S.box) {
+      const open = S.inbox.filter(m => m.handling.status !== "resolvido" && !(m.replied && m.handling.status === "novo"));
+      const sem = open.filter(m => !m.handling.assignee_id && m.triage?.prioridade !== "baixa").length, mine = open.filter(m => m.handling.assignee_id === S.me.id).length;
+      return `<section class="hello"><span class="cap">Grupo ${esc(S.box.name)}${S.box.address ? " · " + esc(S.box.address) : ""}</span>
+        <h2>${greeting()}, ${esc(S.me.name.split(" ")[0])}. O grupo tem ${open.length} e-mails em aberto: <em>${sem} sem dono</em>${mine ? ` e ${mine} com você` : ""}.</h2>
+        <p class="lead">Pergunte sobre a caixa do grupo. Eu mostro o que está sem dono, passo e-mails para quem deve cuidar, registro notas para a equipe e preparo as respostas.</p>
+        <div class="tiles">${TILES_GRUPO.map(([t, d]) => `<button type="button" class="tile" data-q="${esc(t)}"><b>${esc(t)}</b><span>${esc(d)}</span></button>`).join("")}</div></section>`;
+    }
     const l = S.inbox.filter(late).length;
     const day = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
     return `<section class="hello"><span class="cap">${esc(S.account.address || "")} · ${esc(day)}</span>
@@ -107,17 +122,20 @@
     const has = S.account && S.chat.length;
     $("pulse").hidden = !has; if (!has) return;
     const tri = S.inbox.filter(m => m.triage), urg = tri.filter(m => m.triage.prioridade === "urgente" && !m.replied).length;
-    $("pulseIn").innerHTML = `<div><b>${S.inbox.length}</b>e-mails</div><div class="hot"><b>${S.inbox.filter(late).length}</b>atrasados</div><div class="${urg ? "hot" : ""}"><b>${tri.length ? urg : "–"}</b>urgentes</div><div><b>${S.inbox.filter(m => m.draft).length}</b>respostas prontas</div><div class="sync"><button type="button" id="bSync">Atualizar caixa</button></div>`;
+    const sem = S.box ? S.inbox.filter(m => !m.handling.assignee_id && m.handling.status !== "resolvido" && !m.replied && m.triage?.prioridade !== "baixa").length : 0;
+    $("pulseIn").innerHTML = `<div><b>${S.inbox.length}</b>e-mails</div><div class="hot"><b>${S.inbox.filter(late).length}</b>atrasados</div><div class="${urg ? "hot" : ""}"><b>${tri.length ? urg : "–"}</b>urgentes</div>${S.box ? `<div class="${sem ? "hot" : ""}"><b>${sem}</b>sem dono</div>` : `<div><b>${S.inbox.filter(m => m.draft).length}</b>respostas prontas</div>`}<div class="sync"><button type="button" id="bSync">Atualizar caixa</button></div>`;
     $("bSync").onclick = syncNow;
   }
   function renderChat() {
     $("log").innerHTML = !S.chat.length ? hello() : S.chat.map(m => m.role === "user" ? `<div class="msg me"><div class="text">${esc(m.text)}</div></div>` : aiBlock(m)).join("");
     $("composer").hidden = !S.account;
+    $("input").placeholder = S.box ? `Pergunte sobre a caixa do grupo ${S.box.name}` : "Pergunte o que precisa saber sobre a sua caixa";
     wire($("log")); renderPulse(); $("chat").scrollTop = $("chat").scrollHeight;
   }
   function wire(root) {
     root.querySelectorAll("[data-q]").forEach(b => b.onclick = () => send(b.dataset.q));
     root.querySelectorAll("[data-connect]").forEach(b => b.onclick = () => connect(b.dataset.connect));
+    root.querySelectorAll("[data-goto]").forEach(b => b.onclick = () => show(b.dataset.goto));
     root.querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => {
       const id = b.dataset.copy;
       try { await navigator.clipboard.writeText($("ds-" + id).value + "\n\n" + $("db-" + id).value); toast("Resposta copiada"); } catch { toast("Não foi possível copiar. Selecione o texto."); }
@@ -126,9 +144,9 @@
       const id = c.dataset.draft; let t;
       const save = () => { clearTimeout(t); t = setTimeout(async () => {
         try {
-          const r = await api("PUT", "/api/drafts/" + encodeURIComponent(id), { assunto: $("ds-" + id).value, corpo: $("db-" + id).value });
+          const r = await api("PUT", "/api/drafts/" + encodeURIComponent(id) + boxQ(), { assunto: $("ds-" + id).value, corpo: $("db-" + id).value });
           const m = byId(id); if (m) m.draft = { assunto: $("ds-" + id).value, corpo: $("db-" + id).value, saved: r.saved };
-          const st = $("dst-" + id); if (st && r.saved) st.innerHTML = '<span class="saved-tag">Alteração salva no seu e-mail</span>';
+          const st = $("dst-" + id); if (st && r.saved) st.innerHTML = `<span class="saved-tag">Alteração salva ${S.box ? "na caixa do grupo" : "no seu e-mail"}</span>`;
         } catch (e) { toast(e.message); }
       }, 1200); };
       $("ds-" + id).oninput = save; $("db-" + id).oninput = save;
@@ -144,7 +162,7 @@
     node.innerHTML = `<div class="sig"><i></i><span class="cap">GENCO IA</span></div><div class="text"><span class="dots"><i></i><i></i><i></i></span><span class="step">Lendo a caixa e pensando…</span></div>`;
     $("log").appendChild(node); $("chat").scrollTop = $("chat").scrollHeight;
     try {
-      const d = await api("POST", "/api/chat", { texto: text });
+      const d = await api("POST", "/api/chat", { texto: text, grupo: box || undefined });
       S.inbox = d.inbox; S.rules = d.rules;
       S.chat.push({ role: "assistant", text: d.reply.text, cards: d.reply.cards, error: d.reply.error });
     } catch (e) {
@@ -154,7 +172,7 @@
     busy = false; $("send").disabled = false; renderChat();
   }
   async function syncNow() {
-    try { const d = await api("POST", "/api/sync"); S.inbox = d.inbox; toast(d.added ? `${d.added} e-mail${d.added > 1 ? "s" : ""} novo${d.added > 1 ? "s" : ""}` : "Nenhum e-mail novo"); renderChat(); }
+    try { const d = await api("POST", "/api/sync", box ? { grupo: box } : undefined); S.inbox = d.inbox; toast(d.added ? `${d.added} e-mail${d.added > 1 ? "s" : ""} novo${d.added > 1 ? "s" : ""}` : "Nenhum e-mail novo"); renderChat(); }
     catch (e) { toast(e.message); }
   }
   async function connect(p) {
@@ -184,7 +202,7 @@
     return team.map((t, i) => `<div class="teamrow" data-i="${i}"><input id="tn${i}" value="${esc(t.nome)}" placeholder="Nome ou área" aria-label="Nome"><input id="tr${i}" value="${esc(t.regra)}" placeholder="O que essa pessoa cuida" aria-label="Regra"><button type="button" class="iconbtn" data-rm="${i}" aria-label="Remover">×</button></div>`).join("");
   }
   async function renderConfig() {
-    const a = S.account, acc = S.company.access, admin = S.me.role === "admin";
+    const a = S.myAccount, acc = S.company.access, admin = S.me.role === "admin";
     const statusTxt = { active: "Assinatura ativa", trialing: `Teste grátis · ${acc.daysLeft} dia${acc.daysLeft === 1 ? "" : "s"} restante${acc.daysLeft === 1 ? "" : "s"}`, past_due: "Pagamento pendente", trial_ended: "Teste encerrado", canceled: "Assinatura cancelada" }[acc.status] || acc.status;
     $("config").innerHTML = `<h2>Configurações</h2>
       <div class="panel"><h3>Seu e-mail</h3>
@@ -215,8 +233,8 @@
 
     const ro = !canRules();
     $("config").querySelectorAll("#teamRows input, #cCoord, #cAtraso, #cUrg, #cTom").forEach(el => el.disabled = ro);
-    $("cSwap") && ($("cSwap").onclick = () => { S.account = null; S.chat = []; show("conversa"); renderChat(); });
-    $("cSync") && ($("cSync").onclick = syncNow);
+    $("cSwap") && ($("cSwap").onclick = async () => { box = null; await refresh(); S.account = null; S.chat = []; show("conversa"); renderChat(); });
+    $("cSync") && ($("cSync").onclick = async () => { try { const d = await api("POST", "/api/sync"); toast(d.added ? `${d.added} e-mail(s) novo(s)` : "Nenhum e-mail novo"); await refresh(); } catch (e) { toast(e.message); } });
     $("cOff") && ($("cOff").onclick = async () => { try { await api("DELETE", "/api/connect"); await refresh(); toast("E-mail desconectado"); } catch (e) { toast(e.message); } });
     const readTeam = () => [...$("teamRows").querySelectorAll(".teamrow")].map(r => ({ nome: r.children[0].value, regra: r.children[1].value }));
     $("teamRows").onclick = ev => { const b = ev.target.closest("[data-rm]"); if (!b || ro) return; const t = readTeam(); t.splice(+b.dataset.rm, 1); $("teamRows").innerHTML = teamRows(t); };
@@ -270,29 +288,39 @@
     view = v;
     document.querySelectorAll("#nav [data-view]").forEach(b => b.setAttribute("aria-current", b.dataset.view === v ? "page" : "false"));
     $("v-conversa").style.display = v === "conversa" ? "contents" : "none";
-    $("v-equipe").hidden = v !== "equipe"; $("v-config").hidden = v !== "config";
-    $("bNew").hidden = v !== "conversa";
+    $("v-equipe").hidden = v !== "equipe"; $("v-config").hidden = v !== "config"; $("v-grupos").hidden = v !== "grupos";
+    $("bNew").hidden = v !== "conversa"; $("boxSel").hidden = v !== "conversa" || !S.groups.length;
+    if (v === "grupos") window.GencoGrupos.render();
     if (v === "equipe") renderEquipe();
     if (v === "config") renderConfig();
     if (v === "conversa") renderChat();
   }
   async function refresh() {
-    S = await api("GET", "/api/state");
+    try { S = await api("GET", "/api/state" + boxQ()); }
+    catch (e) { if (e.status === 404 && box) { box = null; S = await api("GET", "/api/state"); } else throw e; }
     $("who").textContent = `${S.me.name} · ${S.company.name}`;
     document.querySelector('#nav [data-view="equipe"]').hidden = !canRules();
+    document.querySelector('#nav [data-view="grupos"]').hidden = !(S.groups.length || canRules());
+    $("boxSel").innerHTML = `<option value="">Minha caixa</option>` + S.groups.map(g => `<option value="${g.id}" ${g.id === box ? "selected" : ""}>Grupo ${esc(g.name)}</option>`).join("");
     renderBanner(); show(view);
   }
 
   $("nav").onclick = ev => { const b = ev.target.closest("[data-view]"); if (b) show(b.dataset.view); };
   $("bLogout").onclick = async () => { try { await api("POST", "/api/logout"); } catch {} location.href = "/"; };
-  $("bNew").onclick = async () => { if (busy) return; try { await api("DELETE", "/api/chat"); S.chat = []; renderChat(); } catch (e) { toast(e.message); } };
+  $("boxSel").onchange = async () => { box = Number($("boxSel").value) || null; try { await refresh(); } catch (e) { toast(e.message); } };
+  $("bNew").onclick = async () => { if (busy) return; try { await api("DELETE", "/api/chat" + boxQ()); S.chat = []; renderChat(); } catch (e) { toast(e.message); } };
   $("send").innerHTML = ICON_SEND;
   $("form").addEventListener("submit", ev => { ev.preventDefault(); const t = $("input").value; $("input").value = ""; grow(); send(t); });
   $("input").addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); $("form").requestSubmit(); } });
   const grow = () => { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(180, t.scrollHeight) + "px"; };
   $("input").addEventListener("input", grow);
 
+  // Ponte para a tela Grupos (grupos.js).
+  window.Genco = { api, toast, esc, ago, initials, md, get S() { return S; }, refresh, show,
+    openChat: async id => { box = id; await refresh(); show("conversa"); } };
+
   const q = new URLSearchParams(location.search);
+  if (q.get("grupo")) view = "grupos";
   const notes = { ok: "E-mail conectado. Lendo a caixa…", cancelada: "Conexão cancelada.", expirada: "O pedido de conexão expirou. Tente de novo.", erro: "Não foi possível conectar o e-mail. Tente de novo." };
   refresh().then(() => {
     if (q.get("conexao")) { toast(notes[q.get("conexao")] || ""); if (q.get("conexao") === "ok") setTimeout(refresh, 5000); }

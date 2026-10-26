@@ -16,10 +16,33 @@ O cliente paga apenas a assinatura da GENCO IA. O modelo de IA é contratado pel
 | IA | Conversa em português, qualificação automática dos e-mails novos, rascunhos, conferência de documentos, aprende equipe e critérios pela conversa |
 | Troca de modelo | `AI_PROVIDER=anthropic`, `openai` ou `mock` (simulado). Trocar de fornecedor é mudar uma linha do `.env` |
 | Gestor | Tela "Equipe" com urgentes, atrasados, respostas prontas e e-mails a qualificar por pessoa |
+| Grupos de e-mail | Caixa compartilhada (ex.: operacional@) atendida por várias pessoas: fila única, dono e situação de cada e-mail, notas internas, histórico, carga por pessoa e atribuição automática pela IA |
 | Controle de custo | Registro de uso da IA por empresa e usuário, limite mensal de mensagens por usuário |
 | Demonstração | Caixas de e-mail fictícias (comércio exterior e distribuição) para testar sem conectar e-mail real |
 
 Tudo roda **sem dependências externas**: só Node.js 22.13 ou superior (banco SQLite nativo, criptografia nativa, chamadas diretas às APIs).
+
+---
+
+## Grupos de e-mail (caixa compartilhada)
+
+Para e-mails que chegam num endereço da equipe, como `operacional@empresa.com.br`, atendido por várias pessoas.
+
+**Como funciona**
+- O administrador ou gestor cria o grupo na tela **Grupos**, marca os membros e escreve o que cada um cuida (ex.: "Processos marítimos em Santos", "Exigências fiscais e numerário"). Um membro pode ser marcado como responsável pelo grupo.
+- A GENCO IA lê os e-mails do grupo, qualifica cada um e **define o dono** pela regra de cada pessoa (pode ser desligado).
+- Cada e-mail tem **dono** e **situação**: novo, em andamento, aguardando terceiros ou resolvido. Qualquer membro pode assumir, passar para outra pessoa ou resolver. Tudo fica no histórico.
+- **Notas internas**: a equipe comenta o e-mail sem responder ao cliente.
+- Filtros: em aberto, meus, sem dono, atrasados, resolvidos e por pessoa. Indicadores do grupo e carga de cada pessoa.
+- Na **Conversa**, o seletor no topo troca entre "Minha caixa" e a caixa do grupo. Ex.: "o que está sem dono?", "eu assumo os urgentes", "passa o e-mail do Rodrigo para a Ana".
+- Se um e-mail já tem outro dono, a IA avisa antes de preparar resposta, para duas pessoas não responderem a mesma coisa.
+- A caixa do grupo **não conta como licença** na assinatura. Quem não é membro (nem administrador ou gestor) não vê o grupo.
+
+**Como conectar o e-mail do grupo (Google Workspace)**
+- **Grupo do Google Groups** (cada membro recebe uma cópia): conecte o Gmail de um dos membros e preencha o **endereço do grupo**. A GENCO IA lê só o que chega para esse endereço (`to`, `cc`, `list`, `deliveredto`) e considera respondido quando alguém da equipe responde na mesma conversa, mesmo pelo próprio e-mail. Os rascunhos ficam no Gmail da conta conectada.
+- **Caixa própria** (o endereço tem senha e caixa de entrada): conecte a própria caixa. Nesse caso não é preciso filtro.
+- Em "Filtro avançado" dá para usar qualquer busca do Gmail, por exemplo `label:operacional`.
+- No Outlook/Microsoft 365, conecte a caixa compartilhada diretamente (o filtro por endereço vale só para Gmail nesta versão).
 
 ---
 
@@ -84,7 +107,8 @@ src/
   db.js            banco SQLite (empresas, usuários, contas de e-mail, mensagens, qualificações, rascunhos, conversas, uso)
   security.js      senhas (scrypt), sessões, criptografia AES-256-GCM dos tokens de e-mail
   billing.js       Stripe: checkout, portal, webhook, licenças por usuário, liberação de acesso
-  agent.js         a GENCO IA: contexto, ferramentas (qualificar, mostrar, rascunhar, equipe, critérios)
+  agent.js         a GENCO IA: contexto, ferramentas (qualificar, mostrar, rascunhar, equipe, critérios, atribuir, situação, notas)
+  groups.js        grupos de e-mail: membros, dono e situação, notas, histórico, atribuição automática, indicadores
   templates.js     regras iniciais por ramo (geral, comércio exterior, distribuição)
   ai/              camada de troca de modelo (anthropic, openai, mock)
   mail/            conectores gmail, outlook e demonstração + orquestração
@@ -95,7 +119,8 @@ test/e2e.js        teste automático do fluxo completo
 ## Segurança e privacidade
 - Tokens de acesso ao e-mail ficam **criptografados** no banco. Senhas usam scrypt.
 - A GENCO IA **nunca envia e-mails**: só cria rascunhos e etiquetas.
-- Cada usuário vê apenas a própria caixa. O gestor vê números, não conteúdo.
+- Cada usuário vê apenas a própria caixa. O gestor vê números, não conteúdo das caixas pessoais.
+- A caixa de um grupo é visível para os membros do grupo, administradores e gestores, porque é e-mail da empresa atendido em conjunto.
 - Pela LGPD, a empresa que vende a GENCO IA é **operadora** dos dados dos clientes, e o fornecedor do modelo de IA é **suboperador**. Inclua isso no contrato, na política de privacidade e nos termos de uso, e revise os termos comerciais do fornecedor de IA sobre retenção de dados.
 - Antes de lançar: revisão de segurança por um desenvolvedor, backups diários do banco e monitoramento de erros.
 

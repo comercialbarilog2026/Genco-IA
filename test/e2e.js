@@ -61,6 +61,60 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("bruno", "GET", "/api/team/overview");
     assert.equal(r.status, 403); step("Membro não vê a visão da equipe");
 
+    // ---------- grupo de e-mail (caixa compartilhada) ----------
+    const anaId = (await call("ana", "GET", "/api/state")).data.me.id, brunoId = (await call("bruno", "GET", "/api/state")).data.me.id;
+    r = await call("bruno", "POST", "/api/groups", { nome: "Operacional" });
+    assert.equal(r.status, 403); step("Membro não cria grupo");
+    r = await call("ana", "POST", "/api/groups", { nome: "Operacional", endereco: "operacional@brcomexx.com.br", membros: [
+      { user_id: anaId, regra: "Exigências fiscais, LPCO, anuências, numerário e impostos", coordena: true },
+      { user_id: brunoId, regra: "Processos marítimos em Santos: contêiner, navio, terminal e free time" }] });
+    assert.equal(r.status, 201); const gid = r.data.group.id; step("Grupo Operacional criado com 2 membros");
+
+    r = await call("ana", "GET", "/api/state");
+    assert.equal(r.data.company.seats, 2); assert.equal(r.data.groups.length, 1); step("Caixa do grupo não conta como licença");
+
+    r = await call("ana", "POST", `/api/groups/${gid}/connect/demo`, { setor: "comex" });
+    assert.equal(r.status, 200);
+    r = await call("bruno", "GET", `/api/groups/${gid}`);
+    assert.equal(r.status, 200); assert.equal(r.data.inbox.length, 12); assert.ok(r.data.inbox.every(m => m.triage));
+    const auto = r.data.inbox.filter(m => m.handling.assignee_id);
+    assert.ok(auto.length > 0); assert.ok(auto.some(m => m.handling.assignee_id === brunoId));
+    step(`E-mail do grupo lido e qualificado; IA atribuiu ${auto.length} e-mails pela regra de cada membro`);
+
+    const semDono = r.data.inbox.find(m => !m.handling.assignee_id && !m.replied);
+    r = await call("bruno", "POST", `/api/groups/${gid}/handling`, { ids: [semDono.id], dono: "eu" });
+    let msg = r.data.inbox.find(m => m.id === semDono.id);
+    assert.equal(msg.handling.assignee_id, brunoId); assert.equal(msg.handling.status, "andamento"); step("Membro assumiu um e-mail sem dono (passa para \"em andamento\")");
+
+    r = await call("bruno", "POST", `/api/groups/${gid}/handling`, { ids: [semDono.id], dono: anaId });
+    r = await call("bruno", "POST", `/api/groups/${gid}/messages/${semDono.id}/notes`, { texto: "Ana, cliente pediu retorno até 15h." });
+    assert.equal(r.status, 201);
+    r = await call("ana", "POST", `/api/groups/${gid}/handling`, { ids: [semDono.id], situacao: "resolvido" });
+    r = await call("ana", "GET", `/api/groups/${gid}/messages/${semDono.id}`);
+    assert.deepEqual(r.data.history.map(h => h.kind), ["dono", "dono", "nota", "situacao"]); step("Repasse, nota interna e resolução ficam no histórico");
+
+    r = await call("ana", "POST", `/api/groups/${gid}/handling`, { ids: [semDono.id], situacao: "qualquer" });
+    assert.equal(r.status, 400); step("Situação inválida é recusada");
+
+    r = await call("bruno", "POST", "/api/chat", { texto: "O que está sem dono?", grupo: gid });
+    assert.equal(r.status, 200); assert.ok(/sem dono/.test(r.data.reply.text)); step("Conversa com a IA sobre a caixa do grupo");
+    r = await call("bruno", "GET", "/api/state");
+    assert.ok(r.data.chat.every(c => !/sem dono/.test(c.text || ""))); step("Conversa do grupo separada da conversa pessoal");
+    r = await call("bruno", "POST", "/api/chat", { texto: "Eu assumo os urgentes", grupo: gid });
+    assert.ok(r.data.inbox.some(m => m.handling.assignee_id === brunoId && m.triage.prioridade === "urgente")); step("IA atribui e-mails do grupo pela conversa");
+
+    r = await call("ana", "GET", "/api/team/overview");
+    assert.equal(r.data.groups.length, 1); assert.ok("semDono" in r.data.groups[0]); step("Gestora vê indicadores do grupo na visão da equipe");
+
+    r = await call("ana", "POST", "/api/users", { nome: "Carla Financeiro", email: "carla@exemplo.com", role: "membro" });
+    const tokC = new URL(r.data.link).searchParams.get("token");
+    await call("carla", "POST", "/api/invite/accept", { token: tokC, senha: "senha-carla-3" });
+    r = await call("carla", "GET", `/api/groups/${gid}`); assert.equal(r.status, 404);
+    r = await call("carla", "GET", "/api/state?grupo=" + gid); assert.equal(r.status, 404);
+    r = await call("carla", "GET", "/api/groups"); assert.equal(r.data.groups.length, 0); step("Quem não é do grupo não vê a caixa do grupo");
+    r = await call("ana", "GET", "/api/users"); assert.ok(r.data.users.every(u => !u.email.endsWith("@caixa.genco-ia"))); step("Caixa do grupo não aparece como pessoa");
+    await call("ana", "DELETE", "/api/users/" + r.data.users.find(u => u.email === "carla@exemplo.com").id);
+
     r = await call("bruno", "PUT", "/api/rules", { atraso: 1 });
     assert.equal(r.status, 403); step("Membro não altera as regras");
 

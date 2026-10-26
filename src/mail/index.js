@@ -17,12 +17,16 @@ function saveAccount(userId, provider, t, extra = {}) {
          refresh_token_enc = excluded.refresh_token_enc, expires_at = excluded.expires_at, demo_sector = excluded.demo_sector, last_sync_at = NULL, last_error = NULL`,
     userId, provider, t.address || extra.address || null, encrypt(t.access), encrypt(t.refresh), t.expiresAt || null, extra.demoSector || null);
   // Trocar de conta limpa o que era da conta anterior.
+  clearBox(userId);
+}
+function clearBox(userId) {
   ["messages", "triage", "drafts"].forEach(tbl => run(`DELETE FROM ${tbl} WHERE user_id = ?`, userId));
+  ["handling", "events"].forEach(tbl => run(`DELETE FROM ${tbl} WHERE box_id = ?`, userId));
 }
 
 function disconnect(userId) {
   run("DELETE FROM mail_accounts WHERE user_id = ?", userId);
-  ["messages", "triage", "drafts"].forEach(tbl => run(`DELETE FROM ${tbl} WHERE user_id = ?`, userId));
+  clearBox(userId);
 }
 
 async function accessToken(acc) {
@@ -31,6 +35,21 @@ async function accessToken(acc) {
   const r = await p.refresh(decrypt(acc.refresh_token_enc));
   run("UPDATE mail_accounts SET access_token_enc = ?, refresh_token_enc = ?, expires_at = ? WHERE user_id = ?", encrypt(r.access), encrypt(r.refresh), r.expiresAt, acc.user_id);
   return r.access;
+}
+
+// Caixa de grupo: lê só o que chega para o endereço do grupo e reconhece as respostas da equipe.
+// Ex.: grupo do Google Groups "operacional@empresa.com.br" lido pela conta de um dos membros.
+function groupFetchOptions(userId, acc) {
+  const g = one("SELECT * FROM groups WHERE user_id = ?", userId);
+  if (!g) return {};
+  const addr = String(g.address || "").trim().toLowerCase();
+  let query = String(g.filtro || "").trim();
+  // Só filtra quando a conta conectada não é a própria caixa do grupo.
+  if (!query && addr && addr !== String(acc.address || "").toLowerCase()) query = `{to:${addr} cc:${addr} list:${addr} deliveredto:${addr}}`;
+  const internal = new Set(all("SELECT u.email FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ?", userId).map(r => r.email.toLowerCase()));
+  if (addr) internal.add(addr);
+  if (acc.address && acc.address.includes("@")) internal.add(acc.address.toLowerCase());
+  return { query, internal };
 }
 
 function nextShortId(userId) {
@@ -45,8 +64,9 @@ async function sync(userId, { ai } = {}) {
   const known = new Set(all("SELECT provider_id FROM messages WHERE user_id = ?", userId).map(r => r.provider_id));
   try {
     let list;
-    if (acc.provider === "demo") list = await demo.fetchRecent(acc.demo_sector, { knownIds: known });
-    else list = await PROVIDERS[acc.provider].fetchRecent(await accessToken(acc), { knownIds: known });
+    const opts = { knownIds: known, ...groupFetchOptions(userId, acc) };
+    if (acc.provider === "demo") list = await demo.fetchRecent(acc.demo_sector, opts);
+    else list = await PROVIDERS[acc.provider].fetchRecent(await accessToken(acc), opts);
     const added = [];
     let n = nextShortId(userId);
     for (const m of list) {
@@ -78,16 +98,21 @@ async function sync(userId, { ai } = {}) {
 
 function inbox(userId, limit = 60) {
   return all(`SELECT m.*, t.prioridade, t.categoria, t.responsavel, t.motivo, t.tarefa, t.prazo, t.divergencias_json,
-                     d.assunto AS draft_assunto, d.corpo AS draft_corpo, d.saved_to_mailbox
+                     d.assunto AS draft_assunto, d.corpo AS draft_corpo, d.saved_to_mailbox,
+                     h.assignee_id, h.status AS h_status, h.updated_at AS h_updated, a.name AS assignee_name,
+                     (SELECT COUNT(*) FROM events e WHERE e.box_id = m.user_id AND e.message_id = m.id AND e.kind = 'nota') AS notes
               FROM messages m
               LEFT JOIN triage t ON t.user_id = m.user_id AND t.message_id = m.id
               LEFT JOIN drafts d ON d.user_id = m.user_id AND d.message_id = m.id
+              LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id
+              LEFT JOIN users a ON a.id = h.assignee_id
               WHERE m.user_id = ? ORDER BY m.received_at DESC LIMIT ?`, userId, limit)
     .map(r => ({
       id: r.id, from_name: r.from_name, from_addr: r.from_addr, subject: r.subject, body: r.body, received_at: r.received_at, replied: !!r.replied,
       attachments: json(r.attachments_json, []),
       triage: r.prioridade ? { prioridade: r.prioridade, categoria: r.categoria, responsavel: r.responsavel, motivo: r.motivo, tarefa: r.tarefa, prazo: r.prazo, divergencias: json(r.divergencias_json, []) } : null,
-      draft: r.draft_corpo != null ? { assunto: r.draft_assunto, corpo: r.draft_corpo, saved: !!r.saved_to_mailbox } : null
+      draft: r.draft_corpo != null ? { assunto: r.draft_assunto, corpo: r.draft_corpo, saved: !!r.saved_to_mailbox } : null,
+      handling: { assignee_id: r.assignee_id || null, assignee: r.assignee_name || null, status: r.h_status || "novo", updated_at: r.h_updated || null, notes: r.notes || 0 }
     }));
 }
 
@@ -119,12 +144,14 @@ async function labelMessages(userId, ids) {
   try {
     const tok = await accessToken(acc);
     for (const id of ids) {
-      const m = one("SELECT m.*, t.prioridade, t.responsavel FROM messages m JOIN triage t ON t.user_id = m.user_id AND t.message_id = m.id WHERE m.user_id = ? AND m.id = ?", userId, id);
+      const m = one(`SELECT m.*, t.prioridade, t.responsavel, a.name AS dono FROM messages m JOIN triage t ON t.user_id = m.user_id AND t.message_id = m.id
+                     LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id LEFT JOIN users a ON a.id = h.assignee_id
+                     WHERE m.user_id = ? AND m.id = ?`, userId, id);
       if (!m) continue;
-      const labels = [PRI_LABEL[m.prioridade] || "Normal"]; if (m.responsavel) labels.push(m.responsavel);
+      const labels = [PRI_LABEL[m.prioridade] || "Normal"]; const who = m.dono || m.responsavel; if (who) labels.push(who);
       await p.applyLabels(tok, m, labels);
     }
   } catch (e) { console.error("[etiquetas]", e.message); }
 }
 
-module.exports = { PROVIDERS, account, saveAccount, disconnect, sync, inbox, saveDraft, labelMessages, accessToken };
+module.exports = { PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };

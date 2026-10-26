@@ -14,10 +14,12 @@
     <h1 class="mark"><i></i>GENCO <span>IA</span></h1>
     <nav class="nav" id="nav" aria-label="Seções">
       <button type="button" data-view="conversa" aria-current="page">Conversa</button>
+      <button type="button" data-view="grupos" hidden>Grupos</button>
       <button type="button" data-view="equipe" hidden>Equipe</button>
       <button type="button" data-view="config">Configurações</button>
     </nav>
     <div class="ctl">
+      <select id="boxSel" class="pillsel" aria-label="Caixa em uso na conversa" hidden></select>
       <span class="who" id="who"></span>
       <button type="button" class="txtbtn" id="bNew">Nova conversa</button>
       <button type="button" class="txtbtn" id="bLogout">Sair</button>
@@ -41,6 +43,9 @@
   </div>
 </section>
 
+<!-- Grupos de e-mail -->
+<main id="v-grupos" class="view" hidden><div class="page wide" id="grupos"></div></main>
+
 <!-- Equipe -->
 <main id="v-equipe" class="view" hidden><div class="page" id="equipe"></div></main>
 
@@ -49,5 +54,6 @@
 
 <div class="toast" id="toast" hidden></div>
 <script src="/app.js"></script>
+<script src="/grupos.js"></script>
 </body>
 </html>

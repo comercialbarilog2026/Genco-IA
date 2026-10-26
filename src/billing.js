@@ -24,7 +24,8 @@ async function stripe(method, path, params) {
   return data;
 }
 
-const seats = companyId => one("SELECT COUNT(*) AS n FROM users WHERE company_id = ?", companyId).n;
+// Só pessoas contam como licença; caixas de grupo não são cobradas.
+const seats = companyId => one("SELECT COUNT(*) AS n FROM users WHERE company_id = ? AND kind = 'pessoa'", companyId).n;
 
 // Situação da assinatura que o app usa para liberar ou bloquear o uso.
 function access(company) {

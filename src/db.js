@@ -93,10 +93,55 @@ CREATE TABLE IF NOT EXISTS usage (
   input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
+-- Grupos de e-mail (caixas compartilhadas). Cada grupo tem uma "caixa" própria, representada por uma
+-- linha em users com kind = 'grupo' (como as caixas compartilhadas do Exchange). Assim mensagens,
+-- qualificações e rascunhos do grupo reaproveitam as mesmas tabelas das caixas pessoais.
+CREATE TABLE IF NOT EXISTS groups (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,   -- id da caixa do grupo
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  address TEXT,                                     -- ex.: operacional@empresa.com.br
+  filtro TEXT,                                      -- busca do Gmail que separa os e-mails do grupo (opcional)
+  auto_atribuir INTEGER NOT NULL DEFAULT 1,         -- IA define o dono pela sugestão de responsável
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id INTEGER NOT NULL REFERENCES groups(user_id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  regra TEXT NOT NULL DEFAULT '',                   -- o que essa pessoa cuida dentro do grupo
+  coordena INTEGER NOT NULL DEFAULT 0,              -- responsável pelo grupo (recebe o resumo)
+  PRIMARY KEY (group_id, user_id)
+);
+-- Atendimento de cada e-mail do grupo: quem é o dono e em que situação está.
+CREATE TABLE IF NOT EXISTS handling (
+  box_id INTEGER NOT NULL, message_id TEXT NOT NULL,
+  assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'novo',              -- novo | andamento | aguardando | resolvido
+  updated_by INTEGER, updated_at INTEGER NOT NULL,
+  PRIMARY KEY (box_id, message_id)
+);
+-- Histórico e notas internas (a equipe conversa sobre o e-mail sem responder ao cliente).
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  box_id INTEGER NOT NULL, message_id TEXT NOT NULL,
+  user_id INTEGER,                                  -- NULL = GENCO IA
+  kind TEXT NOT NULL,                               -- nota | dono | situacao
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_msg ON events(box_id, message_id, id);
 CREATE INDEX IF NOT EXISTS idx_messages_user_time ON messages(user_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id, id);
 CREATE INDEX IF NOT EXISTS idx_usage_company_time ON usage(company_id, created_at);
 `);
+
+// Migrações de colunas novas em bancos já existentes.
+function addColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+addColumn("users", "kind", "kind TEXT NOT NULL DEFAULT 'pessoa'");   // pessoa | grupo
+addColumn("chats", "box_id", "box_id INTEGER");                     // NULL = caixa pessoal
+db.exec("CREATE INDEX IF NOT EXISTS idx_chats_box ON chats(user_id, box_id, id);");
 
 const now = () => Date.now();
 const one = (sql, ...p) => db.prepare(sql).get(...p);

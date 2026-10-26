@@ -49,21 +49,32 @@ function walk(part, out) {
 }
 
 // Últimos e-mails da caixa de entrada + marcação de "já respondido" pelos enviados recentes.
-async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set() } = {}) {
-  const list = await api(access, "GET", `/messages?maxResults=${max}&q=${encodeURIComponent(`in:inbox newer_than:${days}d -category:promotions -category:social`)}`);
+// query: filtro extra (caixa de grupo). internal: endereços da própria equipe — e-mails deles no grupo
+// contam como resposta, não como e-mail novo a atender.
+const internalSkip = new Map(); // ids já vistos como mensagens internas (evita reler a cada ciclo)
+async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), query = "", internal = null } = {}) {
+  const base = query ? `newer_than:${days}d ${query} -in:sent -in:drafts -in:trash -in:spam` : `in:inbox newer_than:${days}d -category:promotions -category:social`;
+  const list = await api(access, "GET", `/messages?maxResults=${max}&q=${encodeURIComponent(base)}`);
   const sent = await api(access, "GET", `/messages?maxResults=60&q=${encodeURIComponent(`in:sent newer_than:${days + 2}d`)}`);
   const lastSentByThread = {};
+  const markSent = (thread, t) => { lastSentByThread[thread] = Math.max(lastSentByThread[thread] || 0, t); };
   for (const s of sent.messages || []) {
     const m = await api(access, "GET", `/messages/${s.id}?format=minimal`);
-    lastSentByThread[m.threadId] = Math.max(lastSentByThread[m.threadId] || 0, Number(m.internalDate));
+    markSent(m.threadId, Number(m.internalDate));
   }
   const out = [];
   for (const ref of list.messages || []) {
     if (knownIds.has(ref.id)) { out.push({ provider_id: ref.id, known: true, thread_id: ref.threadId }); continue; }
+    if (internal && internalSkip.has(ref.id)) { markSent(ref.threadId, internalSkip.get(ref.id)); continue; }
     const m = await api(access, "GET", `/messages/${ref.id}?format=full`);
+    const from = parseFrom(header(m.payload.headers, "From"));
+    if (internal && internal.has(from.addr.toLowerCase())) {
+      // Resposta de alguém da equipe (ex.: respondeu pelo próprio e-mail com cópia para o grupo).
+      internalSkip.set(ref.id, Number(m.internalDate)); markSent(m.threadId, Number(m.internalDate));
+      continue;
+    }
     const parts = { attachments: [], text: "", html: "" };
     walk(m.payload, parts);
-    const from = parseFrom(header(m.payload.headers, "From"));
     const attachments = [];
     for (const a of parts.attachments.slice(0, 5)) {
       const item = { name: a.name, mime: a.mime, size: a.size };
