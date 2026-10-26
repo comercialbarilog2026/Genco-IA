@@ -1,0 +1,47 @@
+# Publicação no Render direto do GitHub (Blueprint).
+# No Render: New > Blueprint > escolha este repositório. Ele cria o serviço, o disco e pede as chaves marcadas com sync: false.
+services:
+  - type: web
+    name: genco-ia
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Sem "plan", o Render usa a instância paga básica (0,5 CPU / 512 MB), que aceita disco persistente.
+    # O plano free não serve: não tem disco e o banco seria apagado a cada nova versão.
+    region: virginia         # região mais próxima do Brasil entre as do Render
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit  # cada envio para a branch main publica uma nova versão
+    disk:
+      name: dados
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /data/genco-ia.db
+      - key: APP_SECRET
+        generateValue: true  # criado uma vez pelo Render; não troque depois (criptografa os acessos ao e-mail)
+      - key: APP_URL
+        sync: false          # ex.: https://genco-ia.onrender.com ou https://app.gencoia.com.br
+      - key: AI_PROVIDER
+        value: anthropic
+      - key: ANTHROPIC_API_KEY
+        sync: false          # chave da empresa no Anthropic Console (API), não é conta do Claude
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: SYNC_MINUTES
+        value: "15"
+      - key: TRIAL_DAYS
+        value: "14"

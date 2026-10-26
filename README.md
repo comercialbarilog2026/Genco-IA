@@ -68,8 +68,16 @@ Crie uma conta, escolha **Caixa de demonstração** e converse. No modo `mock` a
 
 ## Colocar em produção — passo a passo
 
-### 1. Servidor
-Qualquer serviço que rode Node.js ou Docker: Railway, Render, Fly.io, DigitalOcean, AWS, Google Cloud.
+> **O aplicativo é independente.** Ele roda no servidor da empresa (Render), com login próprio, cobrança própria (Stripe) e IA contratada por chave de API no Anthropic Console. Não depende de conta ou assinatura do Claude: o GitHub é só onde o código fica e de onde o Render publica.
+
+### 1. Servidor (Render, direto do GitHub)
+1. No Render: **New > Blueprint** e escolha o repositório `Genco-IA`. O arquivo `render.yaml` já cria o serviço, o disco de 5 GB em `/data` e o `APP_SECRET`.
+2. O Render pede as chaves marcadas como secretas: `APP_URL` (o endereço do app, ex.: `https://genco-ia.onrender.com`), `ANTHROPIC_API_KEY`, Google, Microsoft e Stripe. Pode deixar Microsoft e Stripe em branco no começo.
+3. Cada envio para a branch `main` no GitHub publica uma nova versão automaticamente. Durante a troca de versão o app fica fora do ar por alguns segundos.
+4. Banco e cópias: o banco fica no disco `/data`. O Render tira um snapshot do disco por dia (guarda 7 dias) e o próprio app grava uma cópia diária em `/data/backups` (guarda 7 dias).
+5. **Não troque o `APP_SECRET` depois de criado**: ele criptografa os acessos ao e-mail e todos teriam de reconectar.
+
+Também roda em qualquer serviço com Node.js ou Docker (Railway, Fly.io, DigitalOcean, AWS, Google Cloud).
 - Use o `Dockerfile` incluído, ou `npm start`.
 - Monte um **disco persistente** em `/data` (é onde fica o banco).
 - Configure um domínio com **https** (ex.: `app.gencoia.com.br`) e coloque em `APP_URL`.

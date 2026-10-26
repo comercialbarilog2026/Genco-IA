@@ -465,11 +465,32 @@ async function tick() {
   }
 }
 
+// Cópia diária do banco no próprio disco (mantém 7 dias). Complementa os snapshots do servidor,
+// com uma cópia consistente do SQLite mesmo com o banco em uso.
+const fs = require("node:fs");
+function backup() {
+  const { db } = require("./db");
+  const dir = path.join(path.dirname(config.dbPath), "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const day = new Date().toISOString().slice(0, 10);
+  const file = path.join(dir, `genco-ia-${day}.db`);
+  if (fs.existsSync(file)) return;
+  db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  const old = fs.readdirSync(dir).filter(f => /^genco-ia-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort().slice(0, -7);
+  old.forEach(f => fs.rmSync(path.join(dir, f), { force: true }));
+  console.log("[backup] cópia do banco criada:", path.basename(file));
+}
+
 if (require.main === module) {
   server.listen(config.port, () => {
     console.log(`GENCO IA no ar em ${config.appUrl} (porta ${config.port}) · IA: ${ai.name()} · Gmail: ${config.features.gmail ? "sim" : "não"} · Outlook: ${config.features.outlook ? "sim" : "não"} · Stripe: ${config.features.stripe ? "sim" : "não"}`);
   });
   setInterval(() => tick().catch(e => console.error("[agendador]", e.message)), Math.max(1, config.syncMinutes) * 60e3);
+  const safeBackup = () => { try { backup(); } catch (e) { console.error("[backup]", e.message); } };
+  setTimeout(safeBackup, 60e3); setInterval(safeBackup, 60 * 60e3);
+  // Desligamento limpo a cada nova versão publicada (o Render envia SIGTERM).
+  const stop = () => { server.close(); try { require("./db").db.close(); } catch {} process.exit(0); };
+  process.on("SIGTERM", stop); process.on("SIGINT", stop);
 }
 
-module.exports = { server, tick };
+module.exports = { server, tick, backup };
