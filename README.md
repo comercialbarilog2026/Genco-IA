@@ -24,6 +24,16 @@ Tudo roda **sem dependências externas**: só Node.js 22.13 ou superior (banco S
 
 ---
 
+## Para uma pessoa só ou para equipes
+
+No cadastro a empresa escolhe **"Só eu"** (uma pessoa, um e-mail) ou **"Minha equipe"** (e-mail de grupo ou várias pessoas). As duas formas usam a mesma tela **Pendências**:
+
+- **Só eu:** a pessoa conecta o próprio Gmail ou Outlook (inclusive @gmail.com comum) e a IA avisa o que precisa de resposta: o que responder primeiro, respostas prontas para revisar, e-mails importantes do dia e o que está aguardando terceiros. Cada aviso tem os botões **Preparar resposta**, **Resolvido** e **Aguardando terceiros**. Não aparece nada de equipe, grupo ou membros, e a assinatura conta 1 usuário.
+- **Minha equipe:** o app começa pedindo para criar o grupo (ex.: operacional@) e funciona como descrito abaixo.
+- Quem começou sozinho pode passar a usar com equipe a qualquer momento (**Usar com equipe**), e quem participa de grupo continua com a própria caixa em **Minha caixa**.
+
+---
+
 ## Grupos de e-mail (caixa compartilhada)
 
 Para e-mails que chegam num endereço da equipe, como `operacional@empresa.com.br`, atendido por várias pessoas.

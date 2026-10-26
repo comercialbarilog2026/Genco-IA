@@ -6,7 +6,10 @@
   const PRI = ["urgente", "alta", "normal", "baixa"];
   const PRI_ORD = { urgente: 0, alta: 1, normal: 2, baixa: 3 };
   
+  // current: id do grupo aberto, ou 0 = "Minha caixa" (pessoa que usa sozinha, com um único e-mail).
   const initialGroup = Number(new URLSearchParams(location.search).get("grupo")) || null;
+  const boxUrl = () => current === 0 ? "/api/me/box" : "/api/groups/" + current;
+  let skipEmpty = false;
   let current = initialGroup, D = null, openId = null, configOpen = false, people = null, busy = false;
 
   const hrs = m => (Date.now() - m.received_at) / 36e5;
@@ -17,24 +20,29 @@
 
   async function render() {
     const { S, esc } = G();
-    if (!S.groups.length) return renderEmpty();
-    if (!current || !S.groups.some(g => g.id === current)) current = S.groups[0].id;
+    const manage = ["admin", "gestor"].includes(S.me.role);
+    // Empresa que se cadastrou como equipe e ainda não tem grupo nem e-mail: começa criando o grupo.
+    if (!S.groups.length && !S.myAccount && manage && S.company.modo === "equipe" && !skipEmpty) return renderEmpty();
+    if (current === null || (current !== 0 && !S.groups.some(g => g.id === current)))
+      current = S.groupLogin ? S.groupLogin.id : (S.groups.length && !S.myAccount ? S.groups[0].id : 0);
     // Quem entrou pelo e-mail do grupo abre direto na própria aba.
     if (!render.opened && S.groupLogin && S.groupLogin.id === current) person = S.me.id;
     render.opened = true;
-    if (!D || D.group.id !== current) page().innerHTML = `<div class="brief"><span class="cap">GENCO IA</span><h2 class="brief-h">Vendo o que está pendente no grupo…</h2></div>`;
-    try { D = await G().api("GET", "/api/groups/" + current); }
-    catch (e) { page().innerHTML = `<div class="brief"><h2 class="brief-h">Não consegui abrir o grupo.</h2><p class="err">${esc(e.message)}</p></div>`; return; }
+    if (!D || D.group.id !== current) page().innerHTML = `<div class="brief"><span class="cap">GENCO IA</span><h2 class="brief-h">Vendo o que está pendente…</h2></div>`;
+    try { D = await G().api("GET", boxUrl()); }
+    catch (e) { page().innerHTML = `<div class="brief"><h2 class="brief-h">Não consegui abrir a caixa.</h2><p class="err">${esc(e.message)}</p></div>`; return; }
     draw();
   }
 
   // ---------- sem grupos ----------
   function renderEmpty() {
     const { S } = G(), manage = ["admin", "gestor"].includes(S.me.role);
-    page().innerHTML = `<h2>Grupos de e-mail</h2>
-      <p class="lead">Um grupo é uma caixa compartilhada, como operacional@ ou atendimento@, atendida por várias pessoas. A GENCO IA qualifica cada e-mail, indica quem deve cuidar e a equipe acompanha quem está com o quê, sem duas pessoas respondendo a mesma coisa.</p>
-      ${manage ? createForm() : `<div class="panel"><p class="muted">Você ainda não participa de nenhum grupo. O administrador ou gestor da sua empresa pode incluir você.</p></div>`}`;
+    page().innerHTML = `<div class="brief"><span class="cap">Primeiro passo</span><h2 class="brief-h">Vamos criar o e-mail da sua equipe.</h2>
+      <p class="lead">Um grupo é um e-mail atendido por várias pessoas, como operacional@ ou atendimento@. Eu leio o que chega, aviso o que está pendente e separo o que é de cada pessoa.</p></div>
+      ${manage ? createForm() : ""}
+      <p class="calm" style="padding-left:0;margin-top:18px">Vai usar só com o seu e-mail, sem equipe? <button type="button" class="linkbtn" id="gSolo">Conectar só o meu e-mail</button></p>`;
     if (manage) wireCreate();
+    $("gSolo").onclick = () => { skipEmpty = true; current = 0; render(); };
   }
   function createForm() {
     return `<div class="panel" id="gNewPanel"><h3>Criar grupo</h3>
@@ -75,8 +83,10 @@
 
   function draw() {
     const { S, esc } = G(), acc = D.account;
-    const switcher = S.groups.length > 1 ? `<select id="gSwitch" class="pillsel" aria-label="Grupo">${S.groups.map(g => `<option value="${g.id}" ${g.id === current ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>` : "";
-    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button><button type="button" class="txtbtn" data-newgroup>Novo grupo</button>` : ""}</div>`;
+    const switcher = S.groups.length ? `<select id="gSwitch" class="pillsel" aria-label="Caixa">${[{ id: 0, name: "Minha caixa" }, ...S.groups].map(g => `<option value="${g.id}" ${g.id === current ? "selected" : ""}>${g.id ? "Grupo " : ""}${esc(g.name)}</option>`).join("")}</select>` : "";
+    const manageAny = ["admin", "gestor"].includes(S.me.role);
+    const tools = `<div class="btools">${switcher}${acc ? `<button type="button" class="txtbtn" id="gSync">Atualizar</button>` : ""}${D.canManage ? `<button type="button" class="txtbtn" id="gCfg" aria-expanded="${configOpen}">Configurar</button>` : ""}${manageAny ? `<button type="button" class="txtbtn" data-newgroup>${S.groups.length ? "Novo grupo" : "Usar com equipe"}</button>` : ""}</div>`;
+    if (D.personal) return drawPersonal(tools);
     const cap = `<span class="cap">Grupo ${esc(D.group.name)}${D.group.address ? " · " + esc(D.group.address) : ""}</span>`;
 
     if (!acc) {
@@ -125,6 +135,62 @@
       <form class="askbox" id="gAsk"><input id="gAskIn" placeholder="Pergunte à GENCO IA sobre o grupo — ex.: o que a Ana tem de urgente?" aria-label="Pergunta sobre o grupo"><button type="submit" class="send" aria-label="Perguntar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></form>`;
     wire();
     if (configOpen && D.canManage) drawConfig();
+  }
+
+  // ---------- caixa pessoal (quem usa sozinho, com um único e-mail) ----------
+  function drawPersonal(tools) {
+    const { S, esc } = G(), acc = D.account, me = S.me;
+    const cap = `<span class="cap">Minha caixa${acc?.address ? " · " + esc(acc.address) : ""}</span>`;
+    if (!acc) {
+      const f = S.features;
+      page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${greeting()}, ${esc(firstName(me.name))}. Conecte o seu e-mail e eu aviso aqui tudo o que precisa de resposta.</h2>
+        <p class="lead">Eu leio pelo acesso oficial do Google ou da Microsoft, preparo as respostas como rascunho e nunca envio nada por você.</p></div>
+        <div id="gCfgBox"></div>
+        <div class="connect">
+          <button type="button" class="conn" data-pconn="gmail" ${f.gmail ? "" : "disabled"}><b>Gmail</b><span>${f.gmail ? "Gmail ou Google Workspace" : "Ainda não configurado neste servidor"}</span></button>
+          <button type="button" class="conn" data-pconn="outlook" ${f.outlook ? "" : "disabled"}><b>Outlook</b><span>${f.outlook ? "Outlook.com ou Microsoft 365" : "Ainda não configurado neste servidor"}</span></button>
+          <button type="button" class="conn" data-pconn="demo"><b>Demonstração</b><span>E-mails fictícios do seu ramo, para conhecer</span></button>
+        </div>`;
+      wire();
+      page().querySelectorAll("[data-pconn]").forEach(b => b.onclick = async () => {
+        const p = b.dataset.pconn;
+        if (p !== "demo") { location.href = "/api/connect/" + p; return; }
+        b.disabled = true;
+        try { await G().api("POST", "/api/connect/demo", { setor: S.company.sector }); await G().refresh(); G().toast("Caixa de demonstração conectada"); }
+        catch (e) { G().toast(e.message); b.disabled = false; }
+      });
+      return;
+    }
+    const open = D.inbox.filter(isOpen);
+    const waitingReply = m => !m.replied && m.handling.status !== "aguardando";
+    const now = open.filter(m => waitingReply(m) && (m.triage?.prioridade === "urgente" || isLate(m))).sort((a, b) => (isLate(b) - isLate(a)) || byPriority(a, b));
+    const used = new Set(now.map(m => m.id));
+    const ready = open.filter(m => m.draft && !used.has(m.id)); ready.forEach(m => used.add(m.id));
+    const soon = open.filter(m => waitingReply(m) && m.triage?.prioridade === "alta" && !used.has(m.id)).sort(byPriority); soon.forEach(m => used.add(m.id));
+    const waiting = open.filter(m => m.handling.status === "aguardando"); waiting.forEach(m => used.add(m.id));
+    const reading = D.inbox.filter(m => !m.triage).length;
+    const rest = D.inbox.filter(m => !used.has(m.id));
+    const total = now.length + soon.length;
+    const headline = total
+      ? `${greeting()}, ${esc(firstName(me.name))}. <em>${plural(total, "e-mail precisa", "e-mails precisam")} da sua resposta.</em>`
+      : `${greeting()}, ${esc(firstName(me.name))}. Sua caixa está em dia.`;
+    const sections = [];
+    if (now.length) {
+      const late = now.filter(isLate).length;
+      sections.push(aviso("crit", `<b>Responda primeiro: ${plural(now.length, "e-mail", "e-mails")}.</b> ${late ? `${plural(late, "está atrasado", "estão atrasados")} — o cliente está esperando.` : "São urgentes."}`, now, "me-now"));
+    }
+    if (ready.length) sections.push(aviso("good", `<b>${plural(ready.length, "resposta pronta", "respostas prontas")} para você revisar e enviar.</b> Ficaram como rascunho no seu e-mail.`, ready, "me-ready"));
+    if (soon.length) sections.push(aviso("warn", `<b>${plural(soon.length, "e-mail importante", "e-mails importantes")} para hoje.</b>`, soon, "me-soon"));
+    if (waiting.length) sections.push(aviso("quiet", `<b>${plural(waiting.length, "e-mail aguardando", "e-mails aguardando")} retorno de terceiros.</b>`, waiting, "me-wait", true));
+    if (reading) sections.push(`<p class="calm">Ainda estou lendo ${plural(reading, "e-mail", "e-mails")}. Em instantes eles aparecem aqui.</p>`);
+    const restOpen = rest.filter(isOpen).length, done = rest.length - restOpen;
+    sections.push(`<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail não pede", "outros e-mails não pedem")} ação agora` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
+      ${showAll ? `<div class="pcards">${rest.sort((x, y) => y.received_at - x.received_at).map(card).join("")}</div>` : ""}`);
+    page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${headline}</h2></div>
+      <div id="gCfgBox"></div>
+      <div class="avisos">${sections.join("")}</div>
+      <form class="askbox" id="gAsk"><input id="gAskIn" placeholder="Pergunte à GENCO IA sobre a sua caixa — ex.: o que o cliente X pediu?" aria-label="Pergunta sobre a sua caixa"><button type="submit" class="send" aria-label="Perguntar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></form>`;
+    wire();
   }
 
   // ---------- abas por pessoa ----------
@@ -201,6 +267,21 @@
     const state = !open ? (statusOf(m) === "respondido" ? "respondido" : "resolvido") : h.status === "aguardando" ? "aguardando terceiros" : "";
     const others = D.members.filter(p => p.id !== h.assignee_id);
     const btns = [];
+    if (D.personal) {
+      if (open) {
+        if (!m.replied) btns.push(m.draft ? `<button type="button" class="btn" data-toggle="${esc(m.id)}">Ver resposta pronta</button>` : `<button type="button" class="btn" data-reply="${esc(m.id)}">Preparar resposta</button>`);
+        btns.push(`<button type="button" class="btn ghost" data-act="resolver">Resolvido</button>`);
+        if (h.status !== "aguardando") btns.push(`<button type="button" class="btn ghost" data-act="aguardar">Aguardando terceiros</button>`);
+      } else btns.push(`<button type="button" class="btn ghost" data-act="reabrir">Reabrir</button>`);
+      btns.push(`<button type="button" class="linkbtn" data-toggle="${esc(m.id)}" aria-expanded="${openId === m.id}">${openId === m.id ? "Fechar" : "Ver e-mail"}</button>`);
+      return `<article class="pcard ${open ? "" : "done"} ${openId === m.id ? "open" : ""}" data-id="${esc(m.id)}">
+        <div class="pc-top"><span class="pdot ${esc(t.prioridade || "")}" title="${esc(t.prioridade || "")}"></span><b>${esc(m.from_name || m.from_addr)}</b><time class="${late ? "late" : ""}">${late ? "esperando há " : "há "}${esc(ago(m))}</time></div>
+        <div class="pc-subj">${esc(m.subject)}</div>
+        <div class="pc-do">${t.tarefa ? `<b>${esc(t.tarefa)}</b>` : esc(t.motivo || "")}${state ? ` · <span>${state}</span>` : ""}${m.draft ? " · resposta pronta" : ""}</div>
+        <div class="pc-act">${btns.join("")}</div>
+        ${openId === m.id ? detail(m) : ""}
+      </article>`;
+    }
     if (open && !mineCard) btns.push(`<button type="button" class="btn" data-act="assumir">Eu assumo</button>`);
     if (open && !h.assignee_id && t.responsavel && D.members.some(p => p.name === t.responsavel && p.id !== me)) {
       const sug = D.members.find(p => p.name === t.responsavel);
@@ -225,9 +306,9 @@
       ${t.motivo ? `<p class="small muted">${esc(t.motivo)}${t.prazo ? ` · prazo ${esc(t.prazo)}` : ""}</p>` : ""}
       ${(t.divergencias || []).length ? `<div class="divg"><span class="cap">Divergências nos documentos</span><ul>${t.divergencias.map(d => `<li>${esc(d)}</li>`).join("")}</ul></div>` : ""}
       <pre class="mailbody">${esc(m.body)}</pre>${m.attachments.map(a => `<details class="orig"><summary>Anexo ${esc(a.name)}</summary><pre class="att">${esc(a.text || "(conteúdo não lido)")}</pre></details>`).join("")}
-      ${m.draft ? `<details class="orig"><summary>Resposta pronta (rascunho)</summary><pre>${esc(m.draft.assunto)}\n\n${esc(m.draft.corpo)}</pre></details>` : ""}
-      <div class="qhist"><span class="cap">Histórico e notas da equipe</span><div id="hist-${esc(m.id)}" class="hist"><p class="small muted">Carregando…</p></div>
-        <form class="noteform" data-note><input placeholder="Nota para a equipe (o cliente não vê)" aria-label="Nota interna" maxlength="2000"><button type="submit" class="btn ghost">Anotar</button></form></div>
+      ${m.draft ? `<details class="orig" ${D.personal ? "open" : ""}><summary>Resposta pronta (rascunho)</summary><pre>${esc(m.draft.assunto)}\n\n${esc(m.draft.corpo)}</pre></details>` : ""}
+      ${D.personal ? "" : `<div class="qhist"><span class="cap">Histórico e notas da equipe</span><div id="hist-${esc(m.id)}" class="hist"><p class="small muted">Carregando…</p></div>
+        <form class="noteform" data-note><input placeholder="Nota para a equipe (o cliente não vê)" aria-label="Nota interna" maxlength="2000"><button type="submit" class="btn ghost">Anotar</button></form></div>`}
     </div>`;
   }
 
@@ -316,13 +397,13 @@
   const DONE_MSG = { assumir: "Agora está com você", resolver: "Marcado como resolvido", aguardar: "Marcado como aguardando terceiros", reabrir: "Reaberto", passar: "Passado para a pessoa" };
   async function act(ids, body, kind) {
     if (busy) return; busy = true;
-    try { const d = await G().api("POST", `/api/groups/${current}/handling`, { ids, ...body }); D.inbox = d.inbox; if (openId && ids.includes(openId) && kind !== "passar") openId = null; await reload(true); if (DONE_MSG[kind]) G().toast(DONE_MSG[kind]); }
+    try { const d = await G().api("POST", current === 0 ? "/api/me/handling" : `/api/groups/${current}/handling`, { ids, ...body }); D.inbox = d.inbox; if (openId && ids.includes(openId) && kind !== "passar") openId = null; await reload(true); if (DONE_MSG[kind]) G().toast(DONE_MSG[kind]); }
     catch (e) { G().toast(e.message); }
     busy = false;
   }
   async function reload(keepScroll) {
     const y = $("v-grupos").scrollTop;
-    D = await G().api("GET", "/api/groups/" + current); draw();
+    D = await G().api("GET", boxUrl()); draw();
     if (keepScroll) $("v-grupos").scrollTop = y;
   }
   async function loadHistory(id) {
@@ -340,18 +421,19 @@
 
   function wire() {
     const root = page();
-    $("gSwitch") && ($("gSwitch").onchange = () => { current = Number($("gSwitch").value); openId = null; person = null; configOpen = false; showAll = false; render(); });
+    $("gSwitch") && ($("gSwitch").onchange = () => { current = Number($("gSwitch").value) || 0; openId = null; person = null; configOpen = false; showAll = false; render(); });
     root.querySelector("[data-newgroup]") && (root.querySelector("[data-newgroup]").onclick = () => { $("gCfgBox").innerHTML = createForm(); wireCreate(); $("gNome").focus(); });
     $("gSync") && ($("gSync").onclick = async () => {
       $("gSync").disabled = true; $("gSync").textContent = "Lendo…";
-      try { const d = await G().api("POST", "/api/sync", { grupo: current }); G().toast(d.added ? `${d.added} e-mail${d.added > 1 ? "s" : ""} novo${d.added > 1 ? "s" : ""}` : "Nenhum e-mail novo"); await reload(); }
+      try { const d = await G().api("POST", "/api/sync", current ? { grupo: current } : undefined); G().toast(d.added ? `${d.added} e-mail${d.added > 1 ? "s" : ""} novo${d.added > 1 ? "s" : ""}` : "Nenhum e-mail novo"); await reload(); }
       catch (e) { G().toast(e.message); $("gSync").disabled = false; $("gSync").textContent = "Atualizar"; }
     });
     $("gCfg") && ($("gCfg").onclick = () => { configOpen = !configOpen; draw(); if (configOpen) $("gCfgBox").scrollIntoView({ behavior: "smooth", block: "start" }); });
     $("gAll") && ($("gAll").onclick = () => { showAll = !showAll; draw(); });
     root.querySelectorAll("[data-person]").forEach(b => b.onclick = () => { person = Number(b.dataset.person) || null; openId = null; draw(); window.scrollTo?.(0, 0); $("v-grupos").scrollTop = 0; });
     root.querySelectorAll("[data-open]").forEach(b => b.onclick = () => { openSections.add(b.dataset.open); draw(); });
-    $("gAsk") && ($("gAsk").onsubmit = async ev => { ev.preventDefault(); const t = $("gAskIn").value.trim(); if (!t) return; const p = person && D.members.find(m => m.id === person); await G().openChat(current); G().ask(p ? `Sobre ${p.id === G().S.me.id ? "os meus e-mails" : "os e-mails de " + p.name}: ${t}` : t); });
+    root.querySelectorAll("[data-reply]").forEach(b => b.onclick = async () => { await G().openChat(current || null); G().ask(`Prepare a resposta do e-mail ${b.dataset.reply}.`); });
+    $("gAsk") && ($("gAsk").onsubmit = async ev => { ev.preventDefault(); const t = $("gAskIn").value.trim(); if (!t) return; const p = person && D.members.find(m => m.id === person); await G().openChat(current || null); G().ask(p ? `Sobre ${p.id === G().S.me.id ? "os meus e-mails" : "os e-mails de " + p.name}: ${t}` : t); });
     root.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { openId = openId === b.dataset.toggle ? null : b.dataset.toggle; draw(); });
     root.querySelectorAll(".pcard").forEach(c => {
       const id = c.dataset.id;
@@ -369,7 +451,7 @@
         } catch (e) { G().toast(e.message); }
       };
     });
-    if (openId) loadHistory(openId);
+    if (openId && !D.personal) loadHistory(openId);
   }
 
   window.GencoGrupos = { render };

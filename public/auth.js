@@ -27,7 +27,7 @@
       catch (e) { $(errEl).textContent = e.message; btn.disabled = false; }
     });
   }
-  wire($("fSignup"), "eSignup", () => post("/api/signup", { empresa: $("sEmpresa").value, setor: $("sSetor").value, nome: $("sNome").value, email: $("sEmail").value, senha: $("sSenha").value }));
+  wire($("fSignup"), "eSignup", () => post("/api/signup", { empresa: $("sEmpresa").value, setor: $("sSetor").value, modo: (document.querySelector('input[name="sModo"]:checked') || {}).value, nome: $("sNome").value, email: $("sEmail").value, senha: $("sSenha").value }));
   wire($("fLogin"), "eLogin", () => post("/api/login", { email: $("lEmail").value, senha: $("lSenha").value }));
 
   const token = new URLSearchParams(location.search).get("token");

@@ -387,3 +387,7 @@ details.adv[open]{display:grid;gap:10px}
 @media (prefers-reduced-motion:reduce){.qperson{transition:none}}
 .pillin{flex:1;min-width:200px;border:1px solid var(--hair);border-radius:999px;padding:8px 14px;background:var(--surface)}
 .pillin:focus{outline:none;border-color:var(--ink-2)}
+fieldset.modo{border:0;padding:0;margin:0;display:grid;gap:8px}
+fieldset.modo legend{font-size:13px;font-weight:500;color:var(--ink-2);margin-bottom:6px;padding:0}
+fieldset.modo .check{border:1px solid var(--hair);border-radius:12px;padding:10px 12px}
+fieldset.modo .check:has(input:checked){border-color:var(--ink-2);background:var(--sunk)}

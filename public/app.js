@@ -4,7 +4,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PRI = ["urgente", "alta", "normal", "baixa"];
   const STATUS_TXT = { novo: "Novo", andamento: "Em andamento", aguardando: "Aguardando terceiros", resolvido: "Resolvido" };
-  let S = null, busy = false, view = "conversa", box = null; // box = id do grupo em uso na conversa (null = caixa pessoal)
+  let S = null, busy = false, view = "grupos", box = null; // abre em Pendências // box = id do grupo em uso na conversa (null = caixa pessoal)
   const boxQ = () => box ? "?grupo=" + box : "";
 
   async function api(method, url, body) {
@@ -300,8 +300,9 @@
     catch (e) { if (e.status === 404 && box) { box = null; S = await api("GET", "/api/state"); } else throw e; }
     $("who").textContent = S.groupLogin ? `${S.me.name} · Grupo ${S.groupLogin.name}` : `${S.me.name} · ${S.company.name}`;
     $("bSwap").hidden = !S.groupLogin;
-    document.querySelector('#nav [data-view="equipe"]').hidden = !canRules();
-    document.querySelector('#nav [data-view="grupos"]').hidden = !(S.groups.length || canRules());
+    // Quem usa sozinho (um único e-mail) não vê a aba Equipe.
+    document.querySelector('#nav [data-view="equipe"]').hidden = !canRules() || (S.company.people < 2 && !S.groups.length);
+    document.querySelector('#nav [data-view="grupos"]').hidden = false;
     $("boxSel").innerHTML = `<option value="">Minha caixa</option>` + S.groups.map(g => `<option value="${g.id}" ${g.id === box ? "selected" : ""}>Grupo ${esc(g.name)}</option>`).join("");
     renderBanner(); show(view);
   }
@@ -322,10 +323,9 @@
     openChat: async id => { box = id; await refresh(); show("conversa"); } };
 
   const q = new URLSearchParams(location.search);
-  if (q.get("grupo")) view = "grupos";
+
   const notes = { ok: "E-mail conectado. Lendo a caixa…", cancelada: "Conexão cancelada.", expirada: "O pedido de conexão expirou. Tente de novo.", erro: "Não foi possível conectar o e-mail. Tente de novo." };
   refresh().then(() => {
-    if (!q.get("grupo") && !q.get("conexao") && S.groups.length && view === "conversa" && !S.chat.length) show("grupos");
     if (q.get("conexao")) { toast(notes[q.get("conexao")] || ""); if (q.get("conexao") === "ok") setTimeout(refresh, 5000); }
     if (q.get("assinatura") === "ok") toast("Assinatura confirmada. Obrigado!");
     if (q.toString()) history.replaceState(null, "", "/app");

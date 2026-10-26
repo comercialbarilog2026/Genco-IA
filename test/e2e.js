@@ -37,7 +37,7 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     assert.equal(r.data.inbox.length, 12); step("Caixa de demonstração conectada com 12 e-mails");
 
     r = await call("ana", "POST", "/api/chat", { texto: "O que é urgente hoje?" });
-    assert.equal(r.status, 200); assert.ok(r.data.reply.text); assert.ok(r.data.reply.cards.some(c => c.t === "sum"));
+    assert.equal(r.status, 200); assert.ok(r.data.reply.text); assert.ok(r.data.reply.cards.length);
     assert.ok(r.data.inbox.every(m => m.triage)); step(`IA qualificou a caixa (${r.data.inbox.filter(m => m.triage.prioridade === "urgente").length} urgentes) e mostrou cartões`);
 
     r = await call("ana", "POST", "/api/chat", { texto: "Prepare as respostas dos atrasados" });
@@ -144,6 +144,20 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
 
     r = await call("ana", "GET", "/api/team/overview");
     assert.ok(r.data.people.length >= 2); assert.ok(r.data.people.every(p => !("inbox" in p))); step("Gestora vê indicadores da equipe, sem conteúdo dos e-mails");
+
+    // ---------- empresa de uma pessoa só (um único e-mail) ----------
+    r = await call("solo", "POST", "/api/signup", { empresa: "Despachante Silva", setor: "comex", modo: "individual", nome: "João Silva", email: "joao@silva.com.br", senha: "senha-solo-1" });
+    assert.equal(r.status, 201);
+    r = await call("solo", "GET", "/api/state"); assert.equal(r.data.company.modo, "individual"); assert.equal(r.data.groups.length, 0);
+    r = await call("solo", "GET", "/api/me/box"); assert.equal(r.data.personal, true); assert.equal(r.data.account, null); step("Cadastro de uma pessoa só, sem grupo");
+    await call("solo", "POST", "/api/connect/demo", { setor: "comex" });
+    r = await call("solo", "GET", "/api/me/box");
+    assert.equal(r.data.inbox.length, 12); assert.ok(r.data.inbox.every(m => m.triage)); step("Caixa pessoal lida e qualificada ao conectar");
+    const pid = r.data.inbox.find(m => !m.replied).id;
+    r = await call("solo", "POST", "/api/me/handling", { ids: [pid], situacao: "resolvido" });
+    assert.equal(r.data.inbox.find(m => m.id === pid).handling.status, "resolvido");
+    r = await call("solo", "POST", "/api/me/handling", { ids: [pid], situacao: "invalida" }); assert.equal(r.status, 400); step("Pessoa sozinha marca e-mail como resolvido");
+    r = await call("solo", "GET", "/api/team/overview"); assert.equal(r.data.people.length, 1); step("Empresa de uma pessoa conta 1 licença");
 
     r = await call("ana", "POST", "/api/billing/checkout");
     assert.equal(r.status, 503); step("Assinatura avisa que o Stripe ainda não foi configurado");

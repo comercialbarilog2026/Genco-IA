@@ -56,12 +56,13 @@ router.post("/api/signup", async ({ req, res, body }) => {
   throttle("signup:" + ip(req), 5);
   const empresa = String(body.empresa || "").trim(), nome = String(body.nome || "").trim(), email = String(body.email || "").trim().toLowerCase(), senha = String(body.senha || "");
   const setor = SECTORS[body.setor] ? body.setor : "geral";
+  const modo = body.modo === "individual" ? "individual" : "equipe";
   if (!empresa || !nome) throw new HttpError(400, "Informe o nome da empresa e o seu nome.");
   if (!EMAIL_RE.test(email)) throw new HttpError(400, "E-mail inválido.");
   if (senha.length < 8) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
   if (one("SELECT 1 FROM users WHERE email = ?", email)) throw new HttpError(409, "Já existe uma conta com este e-mail. Entre com sua senha.");
-  const c = run("INSERT INTO companies (name, sector, status, trial_ends_at, rules_json, created_at) VALUES (?, ?, 'trialing', ?, ?, ?)",
-    empresa, setor, now() + config.trialDays * 864e5, JSON.stringify(defaultRules(setor, empresa)), now());
+  const c = run("INSERT INTO companies (name, sector, modo, status, trial_ends_at, rules_json, created_at) VALUES (?, ?, ?, 'trialing', ?, ?, ?)",
+    empresa, setor, modo, now() + config.trialDays * 864e5, JSON.stringify(defaultRules(setor, empresa)), now());
   const u = run("INSERT INTO users (company_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, 'admin', ?)", c.lastInsertRowid, nome, email, sec.hashPassword(senha), now());
   send(res, 201, { ok: true }, { "Set-Cookie": sec.sessionCookie(sec.createSession(Number(u.lastInsertRowid))) });
 });
@@ -141,7 +142,7 @@ router.get("/api/state", async (ctx) => {
   send(ctx.res, 200, {
     groupLogin: gl,
     me: publicUser(user),
-    company: { name: company.name, sector: company.sector, sectorName: (SECTORS[company.sector] || SECTORS.geral).nome, access: billing.access(company), seats: billing.seats(company.id), hasSubscription: !!company.stripe_subscription_id },
+    company: { name: company.name, sector: company.sector, modo: company.modo, people: one("SELECT COUNT(*) AS n FROM users WHERE company_id = ? AND kind = 'pessoa'", company.id).n, sectorName: (SECTORS[company.sector] || SECTORS.geral).nome, access: billing.access(company), seats: billing.seats(company.id), hasSubscription: !!company.stripe_subscription_id },
     features: { ...config.features, ai: ai.name() },
     account: acc ? { provider: acc.provider, address: acc.address, demoSector: acc.demo_sector, lastSync: acc.last_sync_at, error: acc.last_error } : null,
     myAccount: (a => a ? { provider: a.provider, address: a.address, demoSector: a.demo_sector, lastSync: a.last_sync_at, error: a.last_error } : null)(mail.account(user.id)),
@@ -233,6 +234,7 @@ router.post("/api/connect/demo", async (ctx) => {
   const setor = SECTORS[ctx.body.setor] ? ctx.body.setor : company.sector;
   mail.saveAccount(user.id, "demo", { address: "caixa de demonstração" }, { demoSector: setor });
   await mail.sync(user.id);
+  if (config.autoTriage && billing.access(company).ok) await agent.autoTriage(user, company).catch(e => console.error("[triagem]", e.message));
   send(ctx.res, 200, { ok: true, inbox: mail.inbox(user.id) });
 });
 router.delete("/api/connect", async (ctx) => { const { user } = auth(ctx); mail.disconnect(user.id); send(ctx.res, 200, { ok: true }); });
@@ -310,6 +312,26 @@ const cleanGroupInput = b => ({
   filtro: b.filtro != null ? String(b.filtro).trim().slice(0, 400) : undefined,
   autoAtribuir: b.autoAtribuir != null ? !!b.autoAtribuir : undefined
 });
+// ---------- pendências da caixa pessoal (quem usa sozinho, com um único e-mail) ----------
+router.get("/api/me/box", async (ctx) => {
+  const { user, company } = auth(ctx);
+  const rules = agent.rulesOf(company);
+  const acc = mail.account(user.id);
+  send(ctx.res, 200, {
+    personal: true, group: { id: 0, name: "Minha caixa", address: acc?.address || "", autoAtribuir: false, groupLogin: false },
+    canManage: false, isMember: false, members: [], statuses: groups.STATUS, atraso: rules.atraso,
+    account: acc ? { provider: acc.provider, address: acc.address, lastSync: acc.last_sync_at, error: acc.last_error } : null,
+    inbox: mail.inbox(user.id, 200)
+  });
+});
+router.post("/api/me/handling", async (ctx) => {
+  const { user, company } = auth(ctx);
+  requireAccess(company);
+  const ids = (Array.isArray(ctx.body.ids) ? ctx.body.ids : [ctx.body.id]).filter(Boolean).map(String).slice(0, 200);
+  try { groups.setHandling({ user_id: user.id, company_id: company.id }, ids, { status: String(ctx.body.situacao) }, user.id); } catch (e) { throw new HttpError(400, e.message); }
+  send(ctx.res, 200, { inbox: mail.inbox(user.id, 200) });
+});
+
 router.get("/api/people", async (ctx) => {
   const { user, company } = auth(ctx);
   if (!groups.canManage(user)) throw new HttpError(403, "Seu perfil não tem permissão para isso.");
