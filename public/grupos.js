@@ -341,6 +341,10 @@
       <h3>Pessoas do grupo</h3>
       <p class="small muted">A GENCO IA encontra as pessoas sozinha: pelos membros do grupo no Google Workspace e por quem da equipe responde nas conversas do grupo. Aqui você ajusta o que cada pessoa cuida — a IA usa isso para definir o dono de cada e-mail.</p>
       ${acc ? `<div class="actions"><button type="button" class="btn ghost" id="cgDetect">Buscar pessoas do grupo agora</button></div>` : ""}
+      <div class="field"><label for="cgPaste">Adicionar pessoas pelo e-mail</label>
+        <textarea id="cgPaste" rows="3" placeholder="Cole os e-mails de quem faz parte do grupo, um por linha ou separados por vírgula.&#10;Ex.: Ana Souza <ana@brcomexx.com.br>, bruno@brcomexx.com.br"></textarea></div>
+      <p class="small muted">Dica: no Google Workspace, a lista fica em groups.google.com &gt; seu grupo &gt; Membros. Copie e cole aqui.</p>
+      <div class="actions"><button type="button" class="btn ghost" id="cgPasteAdd">Adicionar ao grupo</button></div>
       <div class="mrows">${people.map(p => { const m = mem.get(p.id); return `<div class="mrow" data-p="${p.id}">
           <label class="check"><input type="checkbox" ${m ? "checked" : ""} data-in> <span><b>${esc(p.name)}${m && m.origem !== "manual" ? `<span class="pchip">detectado${m.origem === "google" ? " no Google" : ""}</span>` : ""}</b><small>${esc(p.email)}</small></span></label>
           <input data-regra value="${esc(m?.regra || "")}" placeholder="O que essa pessoa cuida no grupo" aria-label="Regra de ${esc(p.name)}">
@@ -371,6 +375,14 @@
     $("cgPassOff") && ($("cgPassOff").onclick = async () => {
       try { await G().api("PUT", `/api/groups/${current}/access`, { senha: "" }); G().toast("Acesso pelo grupo desligado"); await G().refresh(); } catch (e) { G().toast(e.message); }
     });
+    $("cgPasteAdd").onclick = async () => {
+      try {
+        const d = await G().api("POST", `/api/groups/${current}/members/add`, { lista: $("cgPaste").value });
+        G().toast(d.added.length ? `${d.added.length} pessoa${d.added.length > 1 ? "s" : ""} no grupo: ${d.added.join(", ")}. Agora diga o que cada uma cuida.` : "Essas pessoas já estavam no grupo.");
+        if (d.ignored.length) G().toast(`Não incluí ${d.ignored.join(", ")}: já têm conta em outra empresa.`);
+        await reload();
+      } catch (e) { G().toast(e.message); }
+    };
     $("cgDetect") && ($("cgDetect").onclick = async () => {
       $("cgDetect").disabled = true; $("cgDetect").textContent = "Buscando…";
       try { const d = await G().api("POST", `/api/groups/${current}/detect`); G().toast(d.added.length ? `Encontrei ${d.added.length} pessoa${d.added.length > 1 ? "s" : ""}: ${d.added.join(", ")}` : "Nenhuma pessoa nova encontrada"); await reload(); }

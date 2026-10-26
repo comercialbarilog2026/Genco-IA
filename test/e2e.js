@@ -141,6 +141,10 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("ana", "PUT", `/api/groups/${gid}/members`, { membros: (await call("ana", "GET", `/api/groups/${gid}`)).data.members.filter(m => m.id !== detected[1].id).map(m => ({ user_id: m.id, regra: m.regra, coordena: m.coordena })) });
     r = await call("ana", "POST", `/api/groups/${gid}/detect`);
     assert.ok(!r.data.members.some(m => m.id === detected[1].id)); step("Quem o gestor tirou do grupo não volta na próxima detecção");
+    r = await call("ana", "POST", `/api/groups/${gid}/members/add`, { lista: "Paula Reis <paula.reis@brcomexx.com.br>\nlucas@brcomexx.com.br, Marina Alves <marina@brcomexx.com.br>; " + detected[1].email });
+    assert.deepEqual(r.data.added.sort(), ["Lucas", "Marina Alves", "Paula Reis", detected[1].name].sort());
+    r = await call("ana", "POST", `/api/groups/${gid}/members/add`, { lista: "sem email aqui" }); assert.equal(r.status, 400);
+    step("Gestor adiciona pessoas ao grupo colando a lista de e-mails");
     await call("ana", "DELETE", "/api/users/" + (await call("ana", "GET", "/api/users")).data.users.find(u => u.email === "carla@exemplo.com").id);
 
     r = await call("bruno", "PUT", "/api/rules", { atraso: 1 });

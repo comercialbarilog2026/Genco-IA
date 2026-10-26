@@ -483,6 +483,28 @@ router.put("/api/groups/:id/access", async (ctx) => {
   send(ctx.res, 200, { groupLogin: !!senha });
 });
 // Busca agora as pessoas do grupo (Google Grupos e respostas da equipe).
+// Adiciona pessoas ao grupo colando os e-mails (ex.: a lista de membros do Google Grupos).
+// Aceita "Nome <email>", "email" ou "email, Nome", separados por vírgula, ponto e vírgula ou linha.
+router.post("/api/groups/:id/members/add", async (ctx) => {
+  const { user } = auth(ctx);
+  const g = groupOf(ctx, user, { manage: true });
+  const text = String(ctx.body.lista || "").slice(0, 20000);
+  const found = [];
+  for (const part of text.split(/[\n;]+|,(?=\s*[^,]*@)/)) {
+    const m = part.match(/([^\s<>,;"]+@[^\s<>,;"]+\.[^\s<>,;"]+)/); if (!m) continue;
+    const email = m[1].toLowerCase();
+    const name = part.replace(m[0], "").replace(/[<>",;()]/g, " ").replace(/\s+/g, " ").trim();
+    found.push({ email, name: name && !name.includes("@") ? name.slice(0, 80) : "" });
+  }
+  if (!found.length) throw new HttpError(400, "Não encontrei nenhum e-mail no que foi colado.");
+  // quem o gestor adiciona de propósito sai da lista de excluídos
+  for (const f of found) run("DELETE FROM group_excluded WHERE group_id = ? AND email = ?", g.user_id, f.email);
+  const added = groups.addDetected(g, found, "manual");
+  if (added.length) billing.syncSeats(g.company_id);
+  const otherCompany = found.filter(f => { const u = one("SELECT company_id FROM users WHERE email = ?", f.email); return u && u.company_id !== g.company_id; }).map(f => f.email);
+  send(ctx.res, 200, { added, ignored: otherCompany, members: groups.members(g.user_id) });
+});
+
 router.post("/api/groups/:id/detect", async (ctx) => {
   const { user } = auth(ctx);
   const g = groupOf(ctx, user, { manage: true });
