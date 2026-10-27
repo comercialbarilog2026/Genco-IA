@@ -182,6 +182,7 @@ async function sync(userId, { ai } = {}) {
         if (role.papel !== "para" && m.in_reply_to) run("UPDATE messages SET answered_by = ?, answered_at = ? WHERE user_id = ? AND id = ?", who, m.received_at, userId, id);
       }
     }
+    autoResolve(userId);
     run("UPDATE mail_accounts SET last_sync_at = ?, last_error = NULL WHERE user_id = ?", now(), userId);
     const newPeople = await detectMembers(userId, acc, list.teamSeen || []);
     return { added, newPeople };
@@ -191,7 +192,38 @@ async function sync(userId, { ai } = {}) {
   }
 }
 
-function inbox(userId, limit = 60, { bodyMax = 0 } = {}) {
+// Concluído = resolvido, ou respondido (por mim ou por um colega) sem estar aguardando terceiros.
+// A listagem mostra só o que está pendente; os concluídos saem da tela e depois são apagados (prune).
+const DONE_SQL = `(COALESCE(h.status, 'novo') = 'resolvido' OR ((m.replied = 1 OR m.answered_by IS NOT NULL) AND COALESCE(h.status, 'novo') != 'aguardando'))`;
+// Respondido (por mim ou por alguém da equipe) = resolvido automaticamente, a não ser que esteja aguardando terceiros.
+function autoResolve(userId) {
+  run(`INSERT INTO handling (box_id, message_id, assignee_id, status, updated_by, updated_at)
+       SELECT m.user_id, m.id, NULL, 'resolvido', NULL, ? FROM messages m
+       LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id
+       WHERE m.user_id = ? AND (m.replied = 1 OR m.answered_by IS NOT NULL) AND COALESCE(h.status, 'novo') IN ('novo', 'andamento')
+       ON CONFLICT(box_id, message_id) DO UPDATE SET status = 'resolvido', updated_at = excluded.updated_at`, now(), userId);
+}
+
+// Limpeza para não pesar: concluídos perdem o conteúdo depois de 1 dia e são apagados depois de 10
+// (a leitura só olha os últimos 7 dias, então não voltam). Pendentes nunca são apagados.
+function prune() {
+  const t = now(), day = 864e5;
+  const doneIds = `SELECT m.user_id, m.id FROM messages m LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id WHERE ${DONE_SQL}`;
+  run(`UPDATE messages SET body = '', attachments_json = '[]' WHERE body != '' AND (user_id, id) IN (${doneIds} AND COALESCE(h.updated_at, m.synced_at) < ?)`, t - day);
+  const old = all(`${doneIds} AND m.received_at < ?`, t - 10 * day);
+  for (const r of old) {
+    run("DELETE FROM triage WHERE user_id = ? AND message_id = ?", r.user_id, r.id);
+    run("DELETE FROM drafts WHERE user_id = ? AND message_id = ?", r.user_id, r.id);
+    run("DELETE FROM events WHERE box_id = ? AND message_id = ?", r.user_id, r.id);
+    run("DELETE FROM handling WHERE box_id = ? AND message_id = ?", r.user_id, r.id);
+    run("DELETE FROM messages WHERE user_id = ? AND id = ?", r.user_id, r.id);
+  }
+  // Conversas antigas com a IA (mais de 30 dias).
+  run("DELETE FROM chats WHERE created_at < ?", t - 30 * day);
+  return old.length;
+}
+
+function inbox(userId, limit = 60, { bodyMax = 0, includeDone = false } = {}) {
   return all(`SELECT m.*, t.prioridade, t.categoria, t.responsavel, t.motivo, t.tarefa, t.prazo, t.divergencias_json,
                      d.assunto AS draft_assunto, d.corpo AS draft_corpo, d.saved_to_mailbox,
                      h.assignee_id, h.status AS h_status, h.updated_at AS h_updated, a.name AS assignee_name,
@@ -201,7 +233,7 @@ function inbox(userId, limit = 60, { bodyMax = 0 } = {}) {
               LEFT JOIN drafts d ON d.user_id = m.user_id AND d.message_id = m.id
               LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id
               LEFT JOIN users a ON a.id = h.assignee_id
-              WHERE m.user_id = ? ORDER BY m.received_at DESC LIMIT ?`, userId, limit)
+              WHERE m.user_id = ? ${includeDone ? "" : `AND NOT ${DONE_SQL}`} ORDER BY m.received_at DESC LIMIT ?`, userId, limit)
     .map(r => ({
       id: r.id, thread_id: r.thread_id || r.id, from_name: r.from_name, from_addr: r.from_addr, subject: r.subject, body: bodyMax ? String(r.body || "").slice(0, bodyMax) : r.body, received_at: r.received_at,
       replied: !!r.replied || !!r.answered_by, answered_by: r.replied ? null : (r.answered_by || null), papel: r.papel || "para", via: r.via || null,
@@ -250,4 +282,4 @@ async function labelMessages(userId, ids) {
   } catch (e) { console.error("[etiquetas]", e.message); }
 }
 
-module.exports = { connectImap, resolveImap, saveOrRefresh, discover, detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };
+module.exports = { prune, autoResolve, connectImap, resolveImap, saveOrRefresh, discover, detectMembers, PROVIDERS, account, saveAccount, disconnect, clearBox, sync, inbox, saveDraft, labelMessages, accessToken };

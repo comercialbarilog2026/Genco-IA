@@ -481,6 +481,9 @@ const cleanGroupInput = b => ({
   filtro: b.filtro != null ? String(b.filtro).trim().slice(0, 400) : undefined,
   autoAtribuir: b.autoAtribuir != null ? !!b.autoAtribuir : undefined
 });
+// Quantos e-mails saíram da lista hoje (resolvidos à mão ou respondidos).
+const doneToday = boxId => { const t = Date.now(), br = 3 * 3600e3, start = t - ((t - br) % 864e5); // meia-noite de Brasília
+  return one("SELECT COUNT(*) AS n FROM handling WHERE box_id = ? AND status = 'resolvido' AND updated_at >= ?", boxId, start).n; };
 // ---------- pendências da caixa pessoal (quem usa sozinho, com um único e-mail) ----------
 router.get("/api/me/box", async (ctx) => {
   const { user, company } = auth(ctx);
@@ -490,7 +493,7 @@ router.get("/api/me/box", async (ctx) => {
     personal: true, group: { id: 0, name: "Minha caixa", address: acc?.address || "", autoAtribuir: false, groupLogin: false },
     canManage: false, isMember: false, members: [], statuses: groups.STATUS, atraso: rules.atraso,
     account: acc ? { provider: acc.provider, address: acc.address, lastSync: acc.last_sync_at, error: acc.last_error } : null,
-    inbox: mail.inbox(user.id, 400, { bodyMax: 4000 })
+    inbox: mail.inbox(user.id, 400, { bodyMax: 4000 }), doneToday: doneToday(user.id)
   });
 });
 router.post("/api/me/handling", async (ctx) => {
@@ -549,7 +552,7 @@ router.get("/api/groups/:id", async (ctx) => {
     group: groups.publicGroup(g), canManage: groups.canManage(user), isMember: groups.isMember(g.user_id, user.id),
     members: groups.members(g.user_id), statuses: groups.STATUS,
     account: acc ? { provider: acc.provider, address: acc.address, lastSync: acc.last_sync_at, error: acc.last_error } : null,
-    inbox, overview: groups.overview(g, inbox, m => agent.isLate(m, rules)), atraso: rules.atraso, team: rules.team
+    inbox, overview: groups.overview(g, inbox, m => agent.isLate(m, rules)), atraso: rules.atraso, team: rules.team, doneToday: doneToday(g.user_id)
   });
 });
 router.put("/api/groups/:id", async (ctx) => {
@@ -692,7 +695,9 @@ async function tick() {
   if (ticking) return; ticking = true;
   try { await tickAll(); } finally { ticking = false; }
 }
+let lastPrune = 0;
 async function tickAll() {
+  if (Date.now() - lastPrune > 3600e3) { lastPrune = Date.now(); try { const n = mail.prune(); if (n) console.log(`[limpeza] ${n} e-mails concluídos antigos apagados`); } catch (e) { console.error("[limpeza]", e.message); } }
   const rows = all("SELECT a.user_id FROM mail_accounts a");
   for (const r of rows) {
     const user = one("SELECT * FROM users WHERE id = ?", r.user_id); if (!user) continue;

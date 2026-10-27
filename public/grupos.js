@@ -151,8 +151,8 @@
     }
     if (b.waiting.length) sections.push(aviso("quiet", `<b>${plural(b.waiting.length, "e-mail aguardando", "e-mails aguardando")} retorno de terceiros.</b>`, b.waiting, "aguardando", true));
 
-    const restOpen = b.rest.filter(isOpen).length, done = b.rest.length - restOpen;
-    const calm = `<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail está", "outros e-mails estão")} com a equipe dentro do prazo` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
+    const restOpen = b.rest.length;
+    const calm = `<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail está", "outros e-mails estão")} com a equipe dentro do prazo` : "Não há mais nada em aberto"}${D.doneToday ? ` · ${plural(D.doneToday, "saiu da lista hoje", "saíram da lista hoje")} (respondidos ou resolvidos)` : ""}.${restOpen ? ` <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver esses e-mails"}</button>` : ""}</p>
       ${showAll ? `<div class="pcards">${byThread(b.rest.sort((x, y) => y.received_at - x.received_at)).map(card).join("")}</div>` : ""}`;
 
     page().innerHTML = `<div class="brief">${tools}${cap}${peopleTabs()}<h2 class="brief-h">${headline}</h2></div>
@@ -199,7 +199,6 @@
     const normal = byThread(mine.filter(m => waitingReply(m) && !used.has(m.id) && m.triage && !["baixa"].includes(m.triage.prioridade)).sort(byPriority)); normal.forEach(m => m.threadIds.forEach(i => used.add(i)));
     const waiting = byThread(open.filter(m => m.handling.status === "aguardando")); waiting.forEach(m => m.threadIds.forEach(i => used.add(i)));
     const watching = byThread(open.filter(m => !isForMe(m) && !used.has(m.id)).sort((a, b) => b.received_at - a.received_at)); watching.forEach(m => m.threadIds.forEach(i => used.add(i)));
-    const byColleague = D.inbox.filter(m => m.answered_by && Date.now() - m.received_at < 3 * 864e5).length;
     const reading = D.inbox.filter(m => !m.triage && !m.replied).length;
     const rest = D.inbox.filter(m => !used.has(m.id));
     const total = now.length + soon.length;
@@ -217,10 +216,9 @@
     if (normal.length) sections.push(aviso("ink", `<b>${plural(normal.length, "outra conversa espera", "outras conversas esperam")} a sua resposta</b>, sem urgência.`, normal, "me-normal", normal.length > 8));
     if (waiting.length) sections.push(aviso("quiet", `<b>${plural(waiting.length, "e-mail aguardando", "e-mails aguardando")} retorno de terceiros.</b>`, waiting, "me-wait", true));
     if (watching.length) sections.push(aviso("quiet", `<b>Acompanhando: ${plural(watching.length, "conversa", "conversas")} em que você está em cópia.</b> Não pedem nada a você.`, watching, "me-cc", true));
-    if (byColleague) sections.push(`<p class="calm">${plural(byColleague, "e-mail já foi respondido", "e-mails já foram respondidos")} por colegas nos últimos dias — saíram da sua lista.</p>`);
     if (reading) sections.push(`<p class="calm">Ainda estou lendo ${plural(reading, "e-mail", "e-mails")}. Em instantes eles aparecem aqui.</p>`);
-    const restOpen = rest.filter(isOpen).length, done = rest.length - restOpen;
-    sections.push(`<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail não pede", "outros e-mails não pedem")} ação agora (informativos e baixa prioridade)` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
+    const restOpen = rest.length;
+    sections.push(`<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail não pede", "outros e-mails não pedem")} ação agora (informativos e baixa prioridade)` : "Não há mais nada em aberto"}${D.doneToday ? ` · ${plural(D.doneToday, "saiu da lista hoje", "saíram da lista hoje")} (respondidos ou resolvidos)` : ""}.${restOpen ? ` <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver esses e-mails"}</button>` : ""}</p>
       ${showAll ? `<div class="pcards">${byThread(rest.sort((x, y) => y.received_at - x.received_at)).map(card).join("")}</div>` : ""}`);
     page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${headline}</h2></div>
       <div id="gCfgBox"></div>
@@ -248,8 +246,7 @@
     const late = open.filter(m => isLate(m) && m.handling.status !== "aguardando").sort(byPriority);
     const onTime = open.filter(m => !isLate(m) && m.handling.status !== "aguardando").sort(byPriority);
     const waiting = open.filter(m => m.handling.status === "aguardando");
-    const weekAgo = Date.now() - 7 * 864e5;
-    const done = mine.filter(m => m.handling.status === "resolvido" && (m.handling.updated_at || 0) >= weekAgo);
+    const done7 = (D.overview?.pessoas || []).find(x => x.id === p.id)?.resolvidos7d || 0;
     const suggested = D.inbox.filter(m => isOpen(m) && !m.handling.assignee_id && m.triage?.responsavel === p.name).sort(byPriority);
     const nome = isMe ? "Você" : esc(firstName(p.name));
     const headline = open.length
@@ -268,7 +265,7 @@
     }
     if (onTime.length) sections.push(aviso("ink", `<b>${plural(onTime.length, "dentro do prazo", "dentro do prazo")}.</b>`, onTime, "p-ok"));
     if (waiting.length) sections.push(aviso("quiet", `<b>${plural(waiting.length, "aguardando", "aguardando")} retorno de terceiros.</b>`, waiting, "p-wait", true));
-    sections.push(`<p class="calm">${done.length ? `${plural(done.length, "e-mail resolvido", "e-mails resolvidos")} nos últimos 7 dias.` : "Nenhum e-mail resolvido nos últimos 7 dias."}${done.length ? ` <button type="button" class="linkbtn" data-open="p-done">${openSections.has("p-done") ? "" : "Ver"}</button>` : ""}</p>${openSections.has("p-done") && done.length ? `<div class="pcards">${done.map(card).join("")}</div>` : ""}`);
+    sections.push(`<p class="calm">${done7 ? `${plural(done7, "e-mail resolvido", "e-mails resolvidos")} nos últimos 7 dias.` : "Nenhum e-mail resolvido nos últimos 7 dias."}</p>`);
 
     page().innerHTML = `<div class="brief">${tools}${cap}${peopleTabs()}<h2 class="brief-h">${headline}</h2>${fn}</div>
       <div id="gCfgBox"></div>
@@ -447,7 +444,7 @@
   }
 
   // ---------- ações ----------
-  const DONE_MSG = { assumir: "Agora está com você", resolver: "Marcado como resolvido", aguardar: "Marcado como aguardando terceiros", reabrir: "Reaberto", passar: "Passado para a pessoa" };
+  const DONE_MSG = { assumir: "Agora está com você", resolver: "Resolvido — saiu da lista", aguardar: "Marcado como aguardando terceiros", reabrir: "Reaberto", passar: "Passado para a pessoa" };
   async function act(ids, body, kind) {
     if (busy) return; busy = true;
     try { const d = await G().api("POST", current === 0 ? "/api/me/handling" : `/api/groups/${current}/handling`, { ids, ...body }); D.inbox = d.inbox; if (openId && ids.includes(openId) && kind !== "passar") openId = null; await reload(true); if (DONE_MSG[kind]) G().toast(DONE_MSG[kind]); }

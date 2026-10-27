@@ -38,7 +38,7 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     assert.equal(r.status, 400); step("Conversa bloqueada até conectar um e-mail");
 
     r = await call("ana", "POST", "/api/connect/demo", { setor: "comex" });
-    assert.equal(r.data.inbox.length, 12); step("Caixa de demonstração conectada com 12 e-mails");
+    assert.equal(r.data.inbox.length, 11); step("Caixa de demonstração conectada: 12 e-mails, o já respondido fica fora da lista");
 
     r = await call("ana", "POST", "/api/chat", { texto: "O que é urgente hoje?" });
     assert.equal(r.status, 200); assert.ok(r.data.reply.text); assert.ok(r.data.reply.cards.length);
@@ -80,7 +80,7 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("ana", "POST", `/api/groups/${gid}/connect/demo`, { setor: "comex" });
     assert.equal(r.status, 200);
     r = await call("bruno", "GET", `/api/groups/${gid}`);
-    assert.equal(r.status, 200); assert.equal(r.data.inbox.length, 12); assert.ok(r.data.inbox.every(m => m.triage || m.replied));
+    assert.equal(r.status, 200); assert.equal(r.data.inbox.length, 11); assert.ok(r.data.inbox.every(m => m.triage || m.replied));
     const auto = r.data.inbox.filter(m => m.handling.assignee_id);
     assert.ok(auto.length > 0); assert.ok(auto.some(m => m.handling.assignee_id === brunoId));
     step(`E-mail do grupo lido e qualificado; IA atribuiu ${auto.length} e-mails pela regra de cada membro`);
@@ -160,11 +160,11 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("solo", "GET", "/api/me/box"); assert.equal(r.data.personal, true); assert.equal(r.data.account, null); step("Cadastro de uma pessoa só, sem grupo");
     await call("solo", "POST", "/api/connect/demo", { setor: "comex" });
     r = await call("solo", "GET", "/api/me/box");
-    assert.equal(r.data.inbox.length, 12); assert.ok(r.data.inbox.every(m => m.triage || m.replied)); step("Caixa pessoal lida e qualificada ao conectar");
+    assert.equal(r.data.inbox.length, 11); assert.ok(r.data.inbox.every(m => m.triage || m.replied)); step("Caixa pessoal lida e qualificada ao conectar");
     const pid = r.data.inbox.find(m => !m.replied).id;
     r = await call("solo", "POST", "/api/me/handling", { ids: [pid], situacao: "resolvido" });
-    assert.equal(r.data.inbox.find(m => m.id === pid).handling.status, "resolvido");
-    r = await call("solo", "POST", "/api/me/handling", { ids: [pid], situacao: "invalida" }); assert.equal(r.status, 400); step("Pessoa sozinha marca e-mail como resolvido");
+    assert.ok(!r.data.inbox.some(m => m.id === pid)); assert.equal(r.data.inbox.length, 10);
+    r = await call("solo", "POST", "/api/me/handling", { ids: [pid], situacao: "invalida" }); assert.equal(r.status, 400); step("Pessoa sozinha marca e-mail como resolvido e ele sai da lista");
     r = await call("solo", "GET", "/api/team/overview"); assert.equal(r.data.people.length, 1); step("Empresa de uma pessoa conta 1 licença");
 
     // ---------- qualquer provedor por IMAP (servidor IMAP simulado) ----------
@@ -178,11 +178,16 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     assert.equal(r.status, 200, JSON.stringify(r.data));
     r = await call("imap", "GET", "/api/me/box");
     let box = r.data.inbox;
-    assert.equal(r.data.account.provider, "imap"); assert.equal(box.length, 6);
+    const meImap = (await call("imap", "GET", "/api/state")).data.me.id;
+    const dbRows = uid => require("../src/db").all("SELECT m.subject, m.replied, m.answered_by, m.papel, m.via, m.thread_id, h.status FROM messages m LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id WHERE m.user_id = ?", uid);
+    assert.equal(r.data.account.provider, "imap"); assert.equal(dbRows(meImap).length, 6);
+    assert.deepEqual(box.map(m => m.subject).sort(), ["Contêiner parado - segunda vez", "Tabela de precos 2027"]);
+    step("Listagem mostra só o pendente: respondidos (por mim ou por colega) saem da lista");
     const joao = box.find(m => m.from_addr === "joao@cliente.com.br");
     assert.equal(joao.from_name, "João Conceição"); assert.equal(joao.subject, "Contêiner parado - segunda vez"); assert.ok(/perecível/.test(joao.body));
     assert.equal(joao.attachments[0].name, "Invoice 2291.pdf"); step("IMAP: e-mails lidos com acentos, anexo e remetente corretos");
-    assert.ok(box.find(m => m.subject === "Status do embarque").replied); assert.ok(box.find(m => m.subject === "Obrigada").replied); assert.ok(!joao.replied);
+    { const rows = dbRows(meImap), by = x => rows.find(m => m.subject === x);
+      assert.ok(by("Status do embarque").replied && by("Status do embarque").status === "resolvido"); assert.ok(by("Obrigada").replied && by("Obrigada").status === "resolvido"); assert.ok(!joao.replied); }
     step("IMAP: respondidos reconhecidos pela pasta Enviados e pela marcação do servidor");
     assert.ok(box.every(m => m.triage || m.replied)); step("IMAP: caixa qualificada pela IA ao conectar");
     r = await call("imap", "PUT", "/api/drafts/" + joao.id, { assunto: "Re: Contêiner parado", corpo: "Olá, João. Verificando agora." });
@@ -200,15 +205,16 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     const gImap = r.data.group.id;
     r = await call("imap", "POST", "/api/connect/imap", { ...imapLogin, senha: fake.pass, grupo: gImap }); assert.equal(r.status, 200);
     r = await call("imap", "GET", `/api/groups/${gImap}`);
-    const subjects = r.data.inbox.map(m => m.subject).sort();
+    const subjects = dbRows(r.data.group.id).map(m => m.subject).sort();
     assert.deepEqual(subjects, ["Agendamento", "Contêiner parado - segunda vez", "Obrigada", "Status do embarque"]);
-    assert.ok(r.data.inbox.find(m => m.subject === "Agendamento").replied); step("IMAP no grupo: lê só o que foi para operacional@ e reconhece a resposta da equipe");
+    assert.deepEqual(r.data.inbox.map(m => m.subject), ["Contêiner parado - segunda vez"]);
+    assert.ok(dbRows(r.data.group.id).find(m => m.subject === "Agendamento").replied); step("IMAP no grupo: lê só o que foi para operacional@ e reconhece a resposta da equipe");
     assert.ok(r.data.members.some(m => m.email === "rafael.costa@brcomexx.com.br" && m.name === "Rafael Costa" && m.origem === "email")); step("IMAP no grupo: Rafael detectado automaticamente pela resposta dele");
     // Entrou com a própria caixa do grupo: "Qual é o e-mail do grupo?" usa a caixa já conectada
     r = await call("imap", "POST", "/api/groups/connect-start", { endereco: "CAIO@brcomexx.com.br" });
     assert.equal(r.data.adopted, true); assert.equal(r.data.connected, true); assert.equal(r.data.group.name, "Caio");
     const adoptedId = r.data.group.id;
-    r = await call("imap", "GET", `/api/groups/${adoptedId}`); assert.equal(r.data.inbox.length, 6); assert.ok(r.data.inbox.some(m => m.subject === "Contêiner parado - segunda vez"));
+    r = await call("imap", "GET", `/api/groups/${adoptedId}`); assert.equal(dbRows(adoptedId).length, 6); assert.ok(dbRows(adoptedId).some(m => m.subject === "Contêiner parado - segunda vez"));
     r = await call("imap", "GET", "/api/me/box"); assert.equal(r.data.account, null);
     r = await call("imap", "POST", "/api/groups/connect-start", { endereco: "caio@brcomexx.com.br" }); assert.equal(r.data.group.id, adoptedId); assert.equal(r.data.adopted, false);
     step("E-mail do grupo: a caixa já conectada vira a caixa do grupo, com tudo o que já foi lido");
@@ -220,12 +226,12 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
     r = await call("sso1", "POST", "/api/auth/imap", { ...imapLogin, senha: fake.pass });
     assert.equal(r.status, 200); assert.equal(r.data.novo, false);
     r = await call("sso1", "GET", "/api/state"); assert.equal(r.data.me.email, "caio@brcomexx.com.br"); assert.equal(r.data.myAccount.provider, "imap");
-    r = await call("sso1", "GET", "/api/me/box"); assert.ok(r.data.inbox.length >= 6 && r.data.inbox.some(m => m.triage)); step("Entrar com outro e-mail: conta existente entra pela senha do provedor, sem perder o que já foi lido");
+    r = await call("sso1", "GET", "/api/me/box"); assert.ok(dbRows(meImap).length >= 6 && r.data.inbox.some(m => m.triage)); step("Entrar com outro e-mail: conta existente entra pela senha do provedor, sem perder o que já foi lido");
     {
-      const box = r.data.inbox, by = subj => box.find(m => m.subject === subj);
+      const box = dbRows(meImap), by = subj => box.find(m => m.subject === subj);
       assert.equal(by("Tabela de precos 2027").papel, "para");
       assert.equal(by("Status do embarque").papel, "grupo"); assert.equal(by("Status do embarque").via, "operacional@brcomexx.com.br");
-      assert.equal(by("Agendamento").answered_by, "Rafael Costa"); assert.equal(by("Agendamento").replied, true);
+      assert.equal(by("Agendamento").answered_by, "Rafael Costa"); assert.equal(by("Agendamento").status, "resolvido");
       assert.equal(by("RE: Agendamento").thread_id, by("Agendamento").thread_id);
       step("Caixa pessoal: separa 'para você' de 'via grupo' e reconhece quando um colega já respondeu na conversa");
     }
@@ -292,6 +298,18 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
 
     r = await call("ana", "POST", "/api/login", { email: "ana@exemplo.com", senha: "errada" });
     assert.equal(r.status, 401); step("Senha errada é recusada");
+    {
+      const db = require("../src/db"), mail = require("../src/mail"), old = Date.now() - 11 * 864e5;
+      const before = db.one("SELECT COUNT(*) AS n FROM messages").n;
+      const done = db.all("SELECT m.user_id, m.id FROM messages m JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id WHERE h.status = 'resolvido'");
+      const pending = db.one("SELECT m.user_id, m.id FROM messages m LEFT JOIN handling h ON h.box_id = m.user_id AND h.message_id = m.id WHERE COALESCE(h.status, 'novo') = 'novo' AND m.replied = 0 AND m.answered_by IS NULL");
+      db.run("UPDATE messages SET received_at = ?", old); db.run("UPDATE handling SET updated_at = ?", old);
+      const removed = mail.prune();
+      assert.ok(removed >= done.length && removed > 0);
+      assert.ok(db.one("SELECT 1 AS x FROM messages WHERE user_id = ? AND id = ?", pending.user_id, pending.id));
+      assert.equal(db.one("SELECT COUNT(*) AS n FROM messages").n, before - removed);
+      step(`Limpeza: ${removed} e-mails concluídos antigos apagados; pendentes ficam`);
+    }
 
     console.log("\nTodos os testes passaram.");
   } catch (e) {
