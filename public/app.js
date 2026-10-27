@@ -233,10 +233,10 @@
         <div class="actions"><select id="uRole" class="pillsel" aria-label="Perfil"><option value="membro">Membro</option><option value="gestor">Gestor</option><option value="admin">Administrador</option></select><button type="button" class="btn" id="uInvite">Convidar</button></div>
         <div id="inviteOut"></div>
         <p class="small muted">Cada pessoa conecta o próprio e-mail e vê só a própria caixa. Gestores veem os indicadores da equipe.</p></div>
-      <div class="panel"><h3>Assinatura</h3><p><b>${esc(statusTxt)}</b> · ${S.company.seats} usuário${S.company.seats === 1 ? "" : "s"}</p>
+      ${S.features.billing ? `<div class="panel"><h3>Assinatura</h3><p><b>${esc(statusTxt)}</b> · ${S.company.seats} usuário${S.company.seats === 1 ? "" : "s"}</p>
         <p class="small muted">Cobrança mensal por usuário. ${S.features.stripe ? "" : "A cobrança ainda não foi configurada neste servidor."}</p>
         <div class="actions">${S.company.hasSubscription ? `<button type="button" class="btn ghost" id="bPortal">Gerenciar assinatura e pagamento</button>` : `<button type="button" class="btn brand" id="bCheckout" ${S.features.stripe ? "" : "disabled"}>Assinar a GENCO IA</button>`}</div>
-        <p class="small muted">Uso neste mês: ${S.usage.month} de ${S.usage.limit} mensagens para a IA.</p></div>` : ""}`;
+        <p class="small muted">Uso neste mês: ${S.usage.month} de ${S.usage.limit} mensagens para a IA.</p></div>` : ""}` : ""}`;
 
     loadDigest(); renderInstall();
     $("cGroup") && ($("cGroup").onclick = () => window.GencoGrupos.newGroup());

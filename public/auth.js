@@ -41,7 +41,7 @@
   });
   const erro = new URLSearchParams(location.search).get("erro");
   if (erro) {
-    const msg = { "google-indisponivel": "A entrada com Google ainda não foi ativada neste servidor.", "microsoft-indisponivel": "A entrada com Microsoft ainda não foi ativada neste servidor.", cancelado: "Entrada cancelada.", expirado: "O pedido de entrada expirou. Tente de novo.", provedor: "Não foi possível entrar com o provedor. Tente de novo." }[erro];
+    const msg = { "google-indisponivel": "A entrada com Google ainda não foi ativada neste servidor.", "microsoft-indisponivel": "A entrada com Microsoft ainda não foi ativada neste servidor.", cancelado: "Entrada cancelada.", expirado: "O pedido de entrada expirou. Tente de novo.", provedor: "Não foi possível entrar com o provedor. Tente de novo.", dominio: "A GENCO IA é de uso interno do grupo. Entre com o seu e-mail da empresa." }[erro];
     if (msg) { $("fSsoImap").hidden = true; $("eSso").textContent = msg; $("fSsoImap").hidden = false; $("fSsoImap").querySelector("button[type=submit]").hidden = false; }
     history.replaceState(null, "", "/");
   }

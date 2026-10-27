@@ -29,6 +29,7 @@ const seats = companyId => one("SELECT COUNT(*) AS n FROM users WHERE company_id
 
 // Situação da assinatura que o app usa para liberar ou bloquear o uso.
 function access(company) {
+  if (!config.billing) return { ok: true, status: "interno" }; // uso interno do grupo: sem teste nem cobrança
   const t = now();
   if (company.status === "active") return { ok: true, status: "active" };
   if (company.status === "trialing" && company.trial_ends_at > t) return { ok: true, status: "trialing", daysLeft: Math.ceil((company.trial_ends_at - t) / 864e5) };

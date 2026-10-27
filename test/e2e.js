@@ -22,7 +22,7 @@ const step = (n, ok = true) => console.log(`${ok ? "✔" : "✘"} ${n}`);
 
 (async () => {
   smtpBox = await fakeSmtp.start();
-  Object.assign(process.env, { DATABASE_PATH: dbFile, AI_PROVIDER: "mock", APP_URL: "http://localhost:0", STRIPE_WEBHOOK_SECRET: "whsec_test_123", APP_SECRET: "x".repeat(40),
+  Object.assign(process.env, { DATABASE_PATH: dbFile, AI_PROVIDER: "mock", BILLING: "on", APP_URL: "http://localhost:0", STRIPE_WEBHOOK_SECRET: "whsec_test_123", APP_SECRET: "x".repeat(40),
     SMTP_HOST: "127.0.0.1", SMTP_PORT: String(smtpBox.port), SMTP_SECURE: "false", SMTP_USER: "app", SMTP_PASS: "x", SMTP_FROM: "GENCO IA <nao-responda@genco-ia.com.br>" });
   ({ server } = require("../src/server"));
   await new Promise(r => server.listen(0, r));

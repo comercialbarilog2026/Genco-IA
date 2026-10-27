@@ -63,6 +63,7 @@ router.post("/api/signup", async ({ req, res, body }) => {
   if (!EMAIL_RE.test(email)) throw new HttpError(400, "E-mail inválido.");
   if (senha.length < 8) throw new HttpError(400, "A senha precisa ter pelo menos 8 caracteres.");
   if (one("SELECT 1 FROM users WHERE email = ?", email)) throw new HttpError(409, "Já existe uma conta com este e-mail. Entre com sua senha.");
+  checkDomainAllowed(email);
   const c = run("INSERT INTO companies (name, sector, modo, status, trial_ends_at, rules_json, created_at) VALUES (?, ?, ?, 'trialing', ?, ?, ?)",
     empresa, setor, modo, now() + config.trialDays * 864e5, JSON.stringify(defaultRules(setor, empresa)), now());
   const u = run("INSERT INTO users (company_id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, 'admin', ?)", c.lastInsertRowid, nome, email, sec.hashPassword(senha), now());
@@ -263,6 +264,12 @@ router.get("/api/connect/:provider", async (ctx) => {
 });
 // ---------- entrar com a conta do provedor (Google, Microsoft ou qualquer e-mail) ----------
 // A pessoa não cria senha na GENCO IA: nome e e-mail vêm do provedor e a caixa já fica conectada.
+// Uso interno: só os domínios do grupo criam conta (ALLOWED_DOMAINS). Quem já tem conta continua entrando.
+function checkDomainAllowed(email) {
+  const d = String(email).split("@")[1] || "";
+  if (config.allowedDomains.length && !config.allowedDomains.includes(d))
+    throw new HttpError(403, "A GENCO IA é de uso interno do grupo. Entre com o seu e-mail da empresa.");
+}
 const FREE_DOMAINS = /^(gmail|googlemail|outlook|hotmail|live|msn|yahoo|ymail|icloud|me|mac|uol|bol|terra|ig|zoho|zohomail|aol|gmx|proton|protonmail)\./i;
 function companyNameFor(email, name) {
   const domain = String(email).split("@")[1] || "";
@@ -275,6 +282,7 @@ function loginOrSignup({ email, name, provider, tokens }) {
   if (!EMAIL_RE.test(email)) throw new HttpError(400, "O provedor não informou um e-mail válido.");
   let u = one("SELECT * FROM users WHERE email = ? AND kind = 'pessoa'", email), isNew = false;
   if (!u) {
+    checkDomainAllowed(email);
     const nome = String(name || "").trim() || email.split("@")[0];
     // E-mail da empresa (joao@brcomexx, carol@brcomexx...): entra na mesma empresa de quem já usa
     // esse domínio. O provedor confirmou que a pessoa é dona do e-mail, então o domínio basta.
@@ -344,7 +352,7 @@ router.get("/oauth/:provider/callback", async (ctx) => {
       return redirect(ctx.res, "/app?" + (isNew ? "bemvindo=1&" : "") + "conexao=ok", { "Set-Cookie": sec.sessionCookie(sec.createSession(user.id)) });
     } catch (e) {
       console.error("[entrada]", e.message);
-      return redirect(ctx.res, "/?erro=provedor");
+      return redirect(ctx.res, "/?erro=" + (e.status === 403 ? "dominio" : "provedor"));
     }
   }
   const st = one("SELECT * FROM oauth_states WHERE state = ? AND provider = ?", String(q.state || ""), p);

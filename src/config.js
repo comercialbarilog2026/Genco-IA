@@ -36,6 +36,10 @@ const config = {
     user: env("SMTP_USER"), pass: env("SMTP_PASS"), from: env("SMTP_FROM") },
   digestHour: num("DIGEST_HOUR", 8),          // hora padrão do resumo diário (horário de Brasília)
   trialDays: num("TRIAL_DAYS", 14),
+  // Uso interno (sem cobrança): BILLING=on liga teste grátis e assinatura. Padrão: desligado.
+  billing: env("BILLING", "off") === "on",
+  // Só e-mails destes domínios podem criar conta (separados por vírgula). Vazio = qualquer domínio.
+  allowedDomains: env("ALLOWED_DOMAINS", "").split(/[,\s]+/).map(d => d.trim().toLowerCase().replace(/^@/, "")).filter(Boolean),
   syncMinutes: num("SYNC_MINUTES", 15),
   autoTriage: env("AUTO_TRIAGE", "true") !== "false",
   production: env("NODE_ENV") === "production"
@@ -54,6 +58,7 @@ config.features = {
   gmail: !!(config.google.clientId && config.google.clientSecret),
   outlook: !!(config.microsoft.clientId && config.microsoft.clientSecret),
   stripe: !!(config.stripe.secretKey && config.stripe.priceId),
+  billing: config.billing,
   imap: true, // qualquer provedor por IMAP, sem configuração no servidor
   email: !!(env("SMTP_HOST") && env("SMTP_FROM"))
 };
