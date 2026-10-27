@@ -9,7 +9,7 @@ const redirectUri = () => `${config.appUrl}/oauth/gmail/callback`;
 // para o app separar automaticamente cada pessoa do grupo.
 const GROUP_SCOPE = "https://www.googleapis.com/auth/cloud-identity.groups.readonly";
 function authUrl(state, { group = false } = {}) {
-  const p = new URLSearchParams({ client_id: config.google.clientId, redirect_uri: redirectUri(), response_type: "code", scope: [...SCOPES, ...(group ? [GROUP_SCOPE] : [])].join(" "), access_type: "offline", prompt: "consent", include_granted_scopes: "true", state });
+  const p = new URLSearchParams({ client_id: config.google.clientId, redirect_uri: redirectUri(), response_type: "code", scope: SCOPES.join(" "), access_type: "offline", prompt: "consent", include_granted_scopes: "true", state });
   return "https://accounts.google.com/o/oauth2/v2/auth?" + p;
 }
 
