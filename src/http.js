@@ -67,6 +67,7 @@ function serveStatic(root, req, res) {
   if (p === "/app" || p === "/app/") p = "/app.html";
   if (p === "/convite" || p === "/redefinir") p = "/index.html";
   if (p === "/quem") p = "/quem.html";
+  if (p === "/privacidade" || p === "/termos") p += ".html";
   const file = path.normalize(path.join(root, p));
   if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return false;
   res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-cache" });
