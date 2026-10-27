@@ -12,13 +12,14 @@ async function call(body) {
   return d;
 }
 
-async function run({ system, messages, tools, maxRounds = 6, maxTokens = 4096 }) {
+async function run({ system, messages, tools, maxRounds = 6, maxTokens = 4096, fast = false }) {
+  const model = fast ? (config.ai.fastModel || "gpt-4.1-mini") : MODEL();
   const msgs = [{ role: "system", content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))];
   const defs = tools.map(t => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }));
   const usage = { input: 0, output: 0 };
   let text = "";
   for (let round = 0; round < maxRounds; round++) {
-    const d = await call({ model: MODEL(), messages: msgs, tools: defs, max_completion_tokens: maxTokens });
+    const d = await call({ model, messages: msgs, tools: defs, max_completion_tokens: maxTokens });
     usage.input += d.usage?.prompt_tokens || 0; usage.output += d.usage?.completion_tokens || 0;
     const m = d.choices?.[0]?.message || {};
     text = m.content || "";
@@ -32,7 +33,7 @@ async function run({ system, messages, tools, maxRounds = 6, maxTokens = 4096 })
       msgs.push({ role: "tool", tool_call_id: c.id, content: typeof out === "string" ? out : JSON.stringify(out) });
     }
   }
-  return { text: text.trim(), usage, model: MODEL() };
+  return { text: text.trim(), usage, model };
 }
 
 // Leitura de PDF não implementada para este provedor: o anexo segue só com o nome.

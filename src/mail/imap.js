@@ -28,7 +28,7 @@ const skipCache = new Map();
 const skipSet = key => { if (!skipCache.has(key)) skipCache.set(key, new Set()); return skipCache.get(key); };
 
 // Mesmo formato do conector Gmail: { provider_id, thread_id, from_*, subject, body, received_at, replied, attachments }
-async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), internal = null, teamDomain = "", groupAddress = "" } = {}) {
+async function fetchRecent(cfg, { days = 7, max = 300, knownIds = new Set(), internal = null, teamDomain = "", groupAddress = "" } = {}) {
   return withImap(cfg, async c => {
     const boxes = await c.list();
     const sentBox = findBox(boxes, "\\sent", SENT);
@@ -50,10 +50,15 @@ async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), inte
 
     // 2) Caixa de entrada.
     const { uidValidity } = await c.select("INBOX");
-    const all = (await c.searchSince(since)).slice(-Math.max(max * 3, 60));
+    const all = (await c.searchSince(since)).slice(-3000);
     const pid = uid => `imap:${uidValidity}:${uid}`;
     const notForGroup = skipSet(`${cfg.user}@${cfg.host}|grupo:${groupAddress}`);
-    const heads = await c.fetch(all, "UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES DELIVERED-TO X-ORIGINAL-TO LIST-ID DATE)]");
+    // Já conhecidos: só o necessário para saber se foram respondidos. Novos: cabeçalho completo.
+    const knownUids = all.filter(u => knownIds.has(pid(u))), newUids = all.filter(u => !knownIds.has(pid(u)) && !(groupAddress && notForGroup.has(pid(u)))).slice(-Math.max(max * 2, 400));
+    const heads = [
+      ...(knownUids.length ? await c.fetch(knownUids, "UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]") : []),
+      ...(newUids.length ? await c.fetch(newUids, "UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES DELIVERED-TO X-ORIGINAL-TO LIST-ID DATE)]") : [])
+    ];
     heads.sort((a, b) => b.uid - a.uid);
     const teamSeen = new Map();
     const out = [], toRead = [];
@@ -102,7 +107,8 @@ async function fetchRecent(cfg, { days = 7, max = 40, knownIds = new Set(), inte
         body: raw ? String(m.body || "").slice(0, 20000) : "(E-mail muito grande para ler aqui. Abra no seu e-mail.)",
         received_at: received,
         replied: f.flags.includes("\\answered") || answeredIds.has(m.messageId),
-        attachments
+        attachments,
+        to: h.to.map(a => a.addr), cc: h.cc.map(a => a.addr), delivered: [...h.deliveredTo, ...(h.listId ? [h.listId] : [])], in_reply_to: h.inReplyTo || ""
       });
     }
     out.teamSeen = [...teamSeen.values()];

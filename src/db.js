@@ -149,6 +149,12 @@ addColumn("users", "reset_token_hash", "reset_token_hash TEXT");            // r
 addColumn("users", "reset_expires", "reset_expires INTEGER");
 addColumn("companies", "modo", "modo TEXT NOT NULL DEFAULT 'equipe'");       // individual (uma pessoa, um e-mail) | equipe          // acesso da equipe pelo e-mail do grupo
 addColumn("group_members", "origem", "origem TEXT NOT NULL DEFAULT 'manual'"); // manual | google | email | demo
+// Papel de quem recebe: para (destinatário direto) | cc (em cópia) | grupo (chegou por lista/grupo) — e
+// "respondido por" quando um colega da empresa já respondeu na conversa.
+addColumn("messages", "papel", "papel TEXT NOT NULL DEFAULT 'para'");
+addColumn("messages", "via", "via TEXT");
+addColumn("messages", "answered_by", "answered_by TEXT");
+addColumn("messages", "answered_at", "answered_at INTEGER");
 db.exec(`CREATE TABLE IF NOT EXISTS group_excluded (     -- pessoas que o gestor tirou do grupo: a detecção não as recoloca
   group_id INTEGER NOT NULL REFERENCES groups(user_id) ON DELETE CASCADE,
   email TEXT NOT NULL,
@@ -166,6 +172,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS group_sessions (
   expires_at INTEGER NOT NULL
 );`);
 db.exec("CREATE INDEX IF NOT EXISTS idx_chats_box ON chats(user_id, box_id, id);");
+db.exec("CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(user_id, thread_id, received_at);");
 
 const now = () => Date.now();
 const one = (sql, ...p) => db.prepare(sql).get(...p);

@@ -115,6 +115,32 @@ function nextShortId(userId) {
   return (r?.n || 0) + 1;
 }
 
+const FREE_MAIL = /^(gmail|googlemail|outlook|hotmail|live|msn|yahoo|ymail|icloud|me|mac|uol|bol|terra|ig|zoho|zohomail|aol|gmx|proton|protonmail)\./i;
+
+// Quem é "da casa" para a caixa pessoal: o próprio endereço, colegas cadastrados na mesma empresa
+// e qualquer endereço do mesmo domínio corporativo (ex.: @brcomexx.com.br).
+function ownerContext(userId, acc) {
+  const u = one("SELECT * FROM users WHERE id = ?", userId);
+  if (!u || u.kind === "grupo") return null;
+  const me = String(acc.address || u.email || "").toLowerCase();
+  const mine = new Set([me, String(u.email || "").toLowerCase()].filter(Boolean));
+  const domain = me.split("@")[1] || "";
+  const colleagues = new Map(all("SELECT name, email FROM users WHERE company_id = ? AND kind = 'pessoa' AND id != ?", u.company_id, u.id).map(r => [r.email.toLowerCase(), r.name]));
+  return { mine, domain: domain && !FREE_MAIL.test(domain) ? domain : "", colleagues };
+}
+const isColleague = (ctx, addr) => !ctx.mine.has(addr) && (ctx.colleagues.has(addr) || (ctx.domain && addr.endsWith("@" + ctx.domain)));
+
+// Para mim, em cópia ou via grupo/lista.
+function roleOf(ctx, m) {
+  if (!ctx || !m.to) return { papel: "para", via: null };
+  const to = (m.to || []).map(a => a.toLowerCase()), cc = (m.cc || []).map(a => a.toLowerCase());
+  if (to.some(a => ctx.mine.has(a))) return { papel: "para", via: null };
+  if (cc.some(a => ctx.mine.has(a))) return { papel: "cc", via: null };
+  // Não estou em Para nem em Cópia: chegou por um grupo/lista (ex.: compras@) ou cópia oculta.
+  const group = [...to, ...cc].find(a => !ctx.mine.has(a) && ctx.domain && a.endsWith("@" + ctx.domain)) || to[0] || null;
+  return group ? { papel: "grupo", via: group } : { papel: "para", via: null };
+}
+
 // Busca e-mails novos e grava no banco. Retorna os ids curtos dos novos.
 async function sync(userId, { ai } = {}) {
   const acc = account(userId);
@@ -125,13 +151,13 @@ async function sync(userId, { ai } = {}) {
     const opts = { knownIds: known, ...groupFetchOptions(userId, acc) };
     if (acc.provider === "demo") list = await demo.fetchRecent(acc.demo_sector, opts);
     else list = await PROVIDERS[acc.provider].fetchRecent(await accessToken(acc), opts);
+    const ctx = ownerContext(userId, acc);
     const added = [];
     let n = nextShortId(userId);
-    for (const m of list) {
-      if (m.known) {
-        if (m.lastSent) run("UPDATE messages SET replied = 1 WHERE user_id = ? AND provider_id = ? AND received_at < ?", userId, m.provider_id, m.lastSent);
-        continue;
-      }
+    // Mais antigos primeiro: os ids curtos seguem a ordem de chegada e a "resposta do colega" acha a conversa.
+    const fresh = list.filter(m => !m.known).sort((a, b) => a.received_at - b.received_at);
+    for (const m of list) if (m.known && m.lastSent) run("UPDATE messages SET replied = 1 WHERE user_id = ? AND provider_id = ? AND received_at < ?", userId, m.provider_id, m.lastSent);
+    for (const m of fresh) {
       const attachments = [];
       for (const a of m.attachments || []) {
         let text = a.text || null;
@@ -141,10 +167,20 @@ async function sync(userId, { ai } = {}) {
         attachments.push({ name: a.name, mime: a.mime, size: a.size, text: text ? String(text).slice(0, 20000) : null });
       }
       const id = "m" + n++;
-      run(`INSERT OR IGNORE INTO messages (user_id, id, provider_id, thread_id, internet_message_id, from_name, from_addr, subject, body, received_at, replied, attachments_json, synced_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        userId, id, m.provider_id, m.thread_id || null, m.internet_message_id || null, m.from_name || "", m.from_addr || "", m.subject || "", m.body || "", m.received_at, m.replied ? 1 : 0, JSON.stringify(attachments), now());
+      const role = roleOf(ctx, m);
+      run(`INSERT OR IGNORE INTO messages (user_id, id, provider_id, thread_id, internet_message_id, from_name, from_addr, subject, body, received_at, replied, attachments_json, synced_at, papel, via)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        userId, id, m.provider_id, m.thread_id || null, m.internet_message_id || null, m.from_name || "", m.from_addr || "", m.subject || "", m.body || "", m.received_at, m.replied ? 1 : 0, JSON.stringify(attachments), now(), role.papel, role.via);
       added.push(id);
+      // Um colega da empresa respondeu nesta conversa: o que veio antes dele já foi atendido.
+      const from = String(m.from_addr || "").toLowerCase();
+      if (ctx && m.thread_id && isColleague(ctx, from)) {
+        const who = ctx.colleagues.get(from) || m.from_name || from.split("@")[0];
+        run(`UPDATE messages SET answered_by = ?, answered_at = ? WHERE user_id = ? AND thread_id = ? AND received_at < ? AND replied = 0
+               AND (answered_at IS NULL OR answered_at < ?) AND id != ?`, who, m.received_at, userId, m.thread_id, m.received_at, m.received_at, id);
+        // A própria mensagem do colega é só acompanhamento, a não ser que seja dirigida a mim.
+        if (role.papel !== "para" && m.in_reply_to) run("UPDATE messages SET answered_by = ?, answered_at = ? WHERE user_id = ? AND id = ?", who, m.received_at, userId, id);
+      }
     }
     run("UPDATE mail_accounts SET last_sync_at = ?, last_error = NULL WHERE user_id = ?", now(), userId);
     const newPeople = await detectMembers(userId, acc, list.teamSeen || []);
@@ -155,7 +191,7 @@ async function sync(userId, { ai } = {}) {
   }
 }
 
-function inbox(userId, limit = 60) {
+function inbox(userId, limit = 60, { bodyMax = 0 } = {}) {
   return all(`SELECT m.*, t.prioridade, t.categoria, t.responsavel, t.motivo, t.tarefa, t.prazo, t.divergencias_json,
                      d.assunto AS draft_assunto, d.corpo AS draft_corpo, d.saved_to_mailbox,
                      h.assignee_id, h.status AS h_status, h.updated_at AS h_updated, a.name AS assignee_name,
@@ -167,7 +203,8 @@ function inbox(userId, limit = 60) {
               LEFT JOIN users a ON a.id = h.assignee_id
               WHERE m.user_id = ? ORDER BY m.received_at DESC LIMIT ?`, userId, limit)
     .map(r => ({
-      id: r.id, from_name: r.from_name, from_addr: r.from_addr, subject: r.subject, body: r.body, received_at: r.received_at, replied: !!r.replied,
+      id: r.id, thread_id: r.thread_id || r.id, from_name: r.from_name, from_addr: r.from_addr, subject: r.subject, body: bodyMax ? String(r.body || "").slice(0, bodyMax) : r.body, received_at: r.received_at,
+      replied: !!r.replied || !!r.answered_by, answered_by: r.replied ? null : (r.answered_by || null), papel: r.papel || "para", via: r.via || null,
       attachments: json(r.attachments_json, []),
       triage: r.prioridade ? { prioridade: r.prioridade, categoria: r.categoria, responsavel: r.responsavel, motivo: r.motivo, tarefa: r.tarefa, prazo: r.prazo, divergencias: json(r.divergencias_json, []) } : null,
       draft: r.draft_corpo != null ? { assunto: r.draft_assunto, corpo: r.draft_corpo, saved: !!r.saved_to_mailbox } : null,

@@ -54,34 +54,56 @@ function walk(part, out) {
   (part.parts || []).forEach(p => walk(p, out));
 }
 
-// Últimos e-mails da caixa de entrada + marcação de "já respondido" pelos enviados recentes.
+// Executa fn em paralelo, n de cada vez (a API do Gmail aceita bem ~10 pedidos simultâneos).
+async function pmap(items, n, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
+  return out;
+}
+// Lista todas as referências que batem com a busca (paginando), até um teto.
+async function listAll(access, q, cap) {
+  const refs = []; let pageToken = "";
+  do {
+    const d = await api(access, "GET", `/messages?maxResults=500&q=${encodeURIComponent(q)}${pageToken ? "&pageToken=" + pageToken : ""}`);
+    refs.push(...(d.messages || [])); pageToken = d.nextPageToken || "";
+  } while (pageToken && refs.length < cap);
+  return refs.slice(0, cap);
+}
+const addrList = v => String(v || "").split(",").map(x => parseFrom(x).addr.toLowerCase()).filter(a => a.includes("@"));
+
+// E-mails da caixa de entrada (todos os novos, não só os últimos) + marcação de "já respondido" pelos enviados.
 // query: filtro extra (caixa de grupo). internal: endereços da própria equipe — e-mails deles no grupo
 // contam como resposta, não como e-mail novo a atender.
 const internalSkip = new Map(); // ids já vistos como mensagens internas (evita reler a cada ciclo)
-async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), query = "", internal = null, teamDomain = "" } = {}) {
+const sentDates = new Map();    // id do enviado -> data (evita reler os mesmos enviados a cada ciclo)
+async function fetchRecent(access, { days = 7, max = 300, knownIds = new Set(), query = "", internal = null, teamDomain = "" } = {}) {
   const teamSeen = new Map();
   const base = query ? `newer_than:${days}d ${query} -in:sent -in:drafts -in:trash -in:spam` : `in:inbox newer_than:${days}d -category:promotions -category:social`;
-  const list = await api(access, "GET", `/messages?maxResults=${max}&q=${encodeURIComponent(base)}`);
-  const sent = await api(access, "GET", `/messages?maxResults=60&q=${encodeURIComponent(`in:sent newer_than:${days + 2}d`)}`);
+  const refs = await listAll(access, base, 3000);
+  const sent = await listAll(access, `in:sent newer_than:${days + 2}d`, 1500);
   const lastSentByThread = {};
   const markSent = (thread, t) => { lastSentByThread[thread] = Math.max(lastSentByThread[thread] || 0, t); };
-  for (const s of sent.messages || []) {
-    const m = await api(access, "GET", `/messages/${s.id}?format=minimal`);
-    markSent(m.threadId, Number(m.internalDate));
-  }
+  await pmap(sent.filter(s => !sentDates.has(s.id)), 10, async s => { const m = await api(access, "GET", `/messages/${s.id}?format=minimal`); sentDates.set(s.id, Number(m.internalDate)); });
+  for (const s of sent) if (sentDates.has(s.id)) markSent(s.threadId, sentDates.get(s.id));
   const out = [];
-  for (const ref of list.messages || []) {
+  const fresh = [];
+  for (const ref of refs) {
     if (knownIds.has(ref.id)) { out.push({ provider_id: ref.id, known: true, thread_id: ref.threadId }); continue; }
     if (internal && internalSkip.has(ref.id)) { markSent(ref.threadId, internalSkip.get(ref.id)); continue; }
-    const m = await api(access, "GET", `/messages/${ref.id}?format=full`);
-    const from = parseFrom(header(m.payload.headers, "From"));
+    if (fresh.length < max) fresh.push(ref); // o resto entra na próxima leitura
+  }
+  const full = await pmap(fresh, 10, ref => api(access, "GET", `/messages/${ref.id}?format=full`).catch(e => { console.error("[gmail]", e.message); return null; }));
+  for (const m of full) {
+    if (!m) continue;
+    const hs = m.payload.headers;
+    const from = parseFrom(header(hs, "From"));
     const fromAddr = from.addr.toLowerCase();
     // Alguém do mesmo domínio respondendo na conversa do grupo = pessoa da equipe (detectada automaticamente).
-    const isTeamReply = teamDomain && fromAddr.endsWith("@" + teamDomain) && !!header(m.payload.headers, "In-Reply-To");
+    const isTeamReply = teamDomain && fromAddr.endsWith("@" + teamDomain) && !!header(hs, "In-Reply-To");
     if (isTeamReply) teamSeen.set(fromAddr, { email: fromAddr, name: from.name });
     if (internal && (internal.has(fromAddr) || isTeamReply)) {
       // Resposta de alguém da equipe (ex.: respondeu pelo próprio e-mail com cópia para o grupo).
-      internalSkip.set(ref.id, Number(m.internalDate)); markSent(m.threadId, Number(m.internalDate));
+      internalSkip.set(m.id, Number(m.internalDate)); markSent(m.threadId, Number(m.internalDate));
       continue;
     }
     const parts = { attachments: [], text: "", html: "" };
@@ -92,18 +114,23 @@ async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set(), q
       const isText = /^text\//.test(a.mime) || /\.(txt|csv)$/i.test(a.name);
       const isPdf = a.mime === "application/pdf" || /\.pdf$/i.test(a.name);
       if ((isText && a.size <= 200_000) || (isPdf && a.size <= 4_000_000)) {
-        const d = await api(access, "GET", `/messages/${ref.id}/attachments/${a.attachmentId}`);
-        const buf = b64url(d.data);
-        if (isText) item.text = buf.toString("utf8").slice(0, 20000); else item.pdfBase64 = buf.toString("base64");
+        try {
+          const d = await api(access, "GET", `/messages/${m.id}/attachments/${a.attachmentId}`);
+          const buf = b64url(d.data);
+          if (isText) item.text = buf.toString("utf8").slice(0, 20000); else item.pdfBase64 = buf.toString("base64");
+        } catch (e) { console.error("[gmail anexo]", e.message); }
       }
       attachments.push(item);
     }
     const received = Number(m.internalDate);
     out.push({
-      provider_id: m.id, thread_id: m.threadId, internet_message_id: header(m.payload.headers, "Message-ID"),
-      from_name: from.name, from_addr: from.addr, subject: header(m.payload.headers, "Subject") || "(sem assunto)",
+      provider_id: m.id, thread_id: m.threadId, internet_message_id: header(hs, "Message-ID"),
+      from_name: from.name, from_addr: from.addr, subject: header(hs, "Subject") || "(sem assunto)",
       body: (parts.text || stripHtml(parts.html) || m.snippet || "").slice(0, 20000),
-      received_at: received, replied: (lastSentByThread[m.threadId] || 0) > received, attachments
+      received_at: received, replied: (lastSentByThread[m.threadId] || 0) > received, attachments,
+      to: addrList(header(hs, "To")), cc: addrList(header(hs, "Cc")),
+      delivered: [...hs.filter(x => /^(delivered-to|x-original-to)$/i.test(x.name)).map(x => x.value.toLowerCase().trim()), ...(header(hs, "List-Id") ? [header(hs, "List-Id").toLowerCase()] : [])],
+      in_reply_to: header(hs, "In-Reply-To")
     });
   }
   // Atualiza "respondido" também dos já conhecidos.

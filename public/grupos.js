@@ -17,6 +17,20 @@
   const isLate = m => isOpen(m) && !m.replied && hrs(m) >= Number(D.atraso || 4);
   const statusOf = m => m.handling.status === "novo" && m.replied ? "respondido" : m.handling.status;
   const page = () => $("grupos");
+  // Caixa pessoal: o que é de fato para a pessoa responder.
+  const myFirst = () => String(G().S.me.name || "").split(" ")[0].toLowerCase();
+  const asksMe = m => { const f = myFirst(); return f.length > 2 && new RegExp(`(^|[^\\p{L}])${f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}]|$)`, "iu").test(String(m.body || "").slice(0, 1500)); };
+  const isForMe = m => m.papel !== "cc" || m.triage?.prioridade === "urgente" || asksMe(m);
+  // Mesma conversa = um item só (o mais importante/recente aparece; as ações valem para a conversa toda).
+  function byThread(items) {
+    const seen = new Map(), out = [];
+    for (const m of items) {
+      const k = m.thread_id || m.id;
+      if (seen.has(k)) { const r = seen.get(k); r.threadIds.push(m.id); r.threadCount++; continue; }
+      const r = { ...m, threadIds: [m.id], threadCount: 1 }; seen.set(k, r); out.push(r);
+    }
+    return out;
+  }
 
   async function render() {
     const { S, esc } = G();
@@ -83,11 +97,11 @@
   function buckets() {
     const me = G().S.me.id;
     const open = D.inbox.filter(isOpen);
-    const needsOwner = open.filter(m => !m.handling.assignee_id && m.triage?.prioridade !== "baixa").sort(byPriority);
-    const mine = open.filter(m => m.handling.assignee_id === me && m.handling.status !== "aguardando").sort((a, b) => (isLate(b) - isLate(a)) || byPriority(a, b));
-    const teamLate = open.filter(m => m.handling.assignee_id && m.handling.assignee_id !== me && isLate(m) && m.handling.status !== "aguardando").sort(byPriority);
-    const waiting = open.filter(m => m.handling.status === "aguardando");
-    const used = new Set([...needsOwner, ...mine, ...teamLate, ...waiting].map(m => m.id));
+    const needsOwner = byThread(open.filter(m => !m.handling.assignee_id && m.triage?.prioridade !== "baixa").sort(byPriority));
+    const mine = byThread(open.filter(m => m.handling.assignee_id === me && m.handling.status !== "aguardando").sort((a, b) => (isLate(b) - isLate(a)) || byPriority(a, b)));
+    const teamLate = byThread(open.filter(m => m.handling.assignee_id && m.handling.assignee_id !== me && isLate(m) && m.handling.status !== "aguardando").sort(byPriority));
+    const waiting = byThread(open.filter(m => m.handling.status === "aguardando"));
+    const used = new Set([...needsOwner, ...mine, ...teamLate, ...waiting].flatMap(m => m.threadIds));
     const rest = D.inbox.filter(m => !used.has(m.id));
     return { open, needsOwner, mine, teamLate, waiting, rest };
   }
@@ -139,7 +153,7 @@
 
     const restOpen = b.rest.filter(isOpen).length, done = b.rest.length - restOpen;
     const calm = `<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail está", "outros e-mails estão")} com a equipe dentro do prazo` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
-      ${showAll ? `<div class="pcards">${b.rest.sort((x, y) => y.received_at - x.received_at).map(card).join("")}</div>` : ""}`;
+      ${showAll ? `<div class="pcards">${byThread(b.rest.sort((x, y) => y.received_at - x.received_at)).map(card).join("")}</div>` : ""}`;
 
     page().innerHTML = `<div class="brief">${tools}${cap}${peopleTabs()}<h2 class="brief-h">${headline}</h2></div>
       <div id="gCfgBox"></div>
@@ -176,13 +190,17 @@
       return;
     }
     const open = D.inbox.filter(isOpen);
+    const mine = open.filter(isForMe);
     const waitingReply = m => !m.replied && m.handling.status !== "aguardando";
-    const now = open.filter(m => waitingReply(m) && (m.triage?.prioridade === "urgente" || isLate(m))).sort((a, b) => (isLate(b) - isLate(a)) || byPriority(a, b));
-    const used = new Set(now.map(m => m.id));
-    const ready = open.filter(m => m.draft && !used.has(m.id)); ready.forEach(m => used.add(m.id));
-    const soon = open.filter(m => waitingReply(m) && m.triage?.prioridade === "alta" && !used.has(m.id)).sort(byPriority); soon.forEach(m => used.add(m.id));
-    const waiting = open.filter(m => m.handling.status === "aguardando"); waiting.forEach(m => used.add(m.id));
-    const reading = D.inbox.filter(m => !m.triage).length;
+    const now = byThread(mine.filter(m => waitingReply(m) && (m.triage?.prioridade === "urgente" || isLate(m))).sort((a, b) => (isLate(b) - isLate(a)) || byPriority(a, b)));
+    const used = new Set(now.flatMap(m => m.threadIds));
+    const ready = byThread(mine.filter(m => m.draft && !used.has(m.id))); ready.forEach(m => m.threadIds.forEach(i => used.add(i)));
+    const soon = byThread(mine.filter(m => waitingReply(m) && m.triage?.prioridade === "alta" && !used.has(m.id)).sort(byPriority)); soon.forEach(m => m.threadIds.forEach(i => used.add(i)));
+    const normal = byThread(mine.filter(m => waitingReply(m) && !used.has(m.id) && m.triage && !["baixa"].includes(m.triage.prioridade)).sort(byPriority)); normal.forEach(m => m.threadIds.forEach(i => used.add(i)));
+    const waiting = byThread(open.filter(m => m.handling.status === "aguardando")); waiting.forEach(m => m.threadIds.forEach(i => used.add(i)));
+    const watching = byThread(open.filter(m => !isForMe(m) && !used.has(m.id)).sort((a, b) => b.received_at - a.received_at)); watching.forEach(m => m.threadIds.forEach(i => used.add(i)));
+    const byColleague = D.inbox.filter(m => m.answered_by && Date.now() - m.received_at < 3 * 864e5).length;
+    const reading = D.inbox.filter(m => !m.triage && !m.replied).length;
     const rest = D.inbox.filter(m => !used.has(m.id));
     const total = now.length + soon.length;
     window.GencoPWA?.badge(total);
@@ -195,12 +213,15 @@
       sections.push(aviso("crit", `<b>Responda primeiro: ${plural(now.length, "e-mail", "e-mails")}.</b> ${late ? `${plural(late, "está atrasado", "estão atrasados")} — o cliente está esperando.` : "São urgentes."}`, now, "me-now"));
     }
     if (ready.length) sections.push(aviso("good", `<b>${plural(ready.length, "resposta pronta", "respostas prontas")} para você revisar e enviar.</b> Ficaram como rascunho no seu e-mail.`, ready, "me-ready"));
-    if (soon.length) sections.push(aviso("warn", `<b>${plural(soon.length, "e-mail importante", "e-mails importantes")} para hoje.</b>`, soon, "me-soon"));
+    if (soon.length) sections.push(aviso("warn", `<b>${plural(soon.length, "conversa importante", "conversas importantes")} para hoje.</b>`, soon, "me-soon"));
+    if (normal.length) sections.push(aviso("ink", `<b>${plural(normal.length, "outra conversa espera", "outras conversas esperam")} a sua resposta</b>, sem urgência.`, normal, "me-normal", normal.length > 8));
     if (waiting.length) sections.push(aviso("quiet", `<b>${plural(waiting.length, "e-mail aguardando", "e-mails aguardando")} retorno de terceiros.</b>`, waiting, "me-wait", true));
+    if (watching.length) sections.push(aviso("quiet", `<b>Acompanhando: ${plural(watching.length, "conversa", "conversas")} em que você está em cópia.</b> Não pedem nada a você.`, watching, "me-cc", true));
+    if (byColleague) sections.push(`<p class="calm">${plural(byColleague, "e-mail já foi respondido", "e-mails já foram respondidos")} por colegas nos últimos dias — saíram da sua lista.</p>`);
     if (reading) sections.push(`<p class="calm">Ainda estou lendo ${plural(reading, "e-mail", "e-mails")}. Em instantes eles aparecem aqui.</p>`);
     const restOpen = rest.filter(isOpen).length, done = rest.length - restOpen;
-    sections.push(`<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail não pede", "outros e-mails não pedem")} ação agora` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
-      ${showAll ? `<div class="pcards">${rest.sort((x, y) => y.received_at - x.received_at).map(card).join("")}</div>` : ""}`);
+    sections.push(`<p class="calm">${restOpen ? `${plural(restOpen, "outro e-mail não pede", "outros e-mails não pedem")} ação agora (informativos e baixa prioridade)` : "Não há mais nada em aberto"}${done ? ` · ${plural(done, "já respondido ou resolvido", "já respondidos ou resolvidos")}` : ""}. <button type="button" class="linkbtn" id="gAll">${showAll ? "Esconder" : "Ver todos os e-mails"}</button></p>
+      ${showAll ? `<div class="pcards">${byThread(rest.sort((x, y) => y.received_at - x.received_at)).map(card).join("")}</div>` : ""}`);
     page().innerHTML = `<div class="brief">${tools}${cap}<h2 class="brief-h">${headline}</h2></div>
       <div id="gCfgBox"></div>
       <div class="avisos">${sections.join("")}</div>
@@ -277,9 +298,12 @@
 
   function card(m) {
     const { esc, ago, S } = G(), t = m.triage || {}, h = m.handling, me = S.me.id, late = isLate(m), open = isOpen(m);
+    const ids = esc((m.threadIds || [m.id]).join(","));
+    const tags = [m.threadCount > 1 ? `${m.threadCount} e-mails na conversa` : "", D.personal && m.papel === "cc" ? "você em cópia" : "", D.personal && m.papel === "grupo" && m.via ? `via ${m.via}` : "", m.answered_by ? `respondido por ${m.answered_by}` : ""].filter(Boolean);
+    const tagHtml = tags.length ? `<div class="pc-tags">${tags.map(x => `<span class="ptag">${esc(x)}</span>`).join("")}</div>` : "";
     const mineCard = h.assignee_id === me;
     const who = h.assignee ? (mineCard ? "com você" : `com ${esc(h.assignee)}`) : (t.responsavel ? `IA sugere ${esc(t.responsavel)}` : "sem dono");
-    const state = !open ? (statusOf(m) === "respondido" ? "respondido" : "resolvido") : h.status === "aguardando" ? "aguardando terceiros" : "";
+    const state = !open ? (m.answered_by ? "" : statusOf(m) === "respondido" ? "respondido" : "resolvido") : h.status === "aguardando" ? "aguardando terceiros" : "";
     const others = D.members.filter(p => p.id !== h.assignee_id);
     const btns = [];
     if (D.personal) {
@@ -289,9 +313,9 @@
         if (h.status !== "aguardando") btns.push(`<button type="button" class="btn ghost" data-act="aguardar">Aguardando terceiros</button>`);
       } else btns.push(`<button type="button" class="btn ghost" data-act="reabrir">Reabrir</button>`);
       btns.push(`<button type="button" class="linkbtn" data-toggle="${esc(m.id)}" aria-expanded="${openId === m.id}">${openId === m.id ? "Fechar" : "Ver e-mail"}</button>`);
-      return `<article class="pcard ${open ? "" : "done"} ${openId === m.id ? "open" : ""}" data-id="${esc(m.id)}">
+      return `<article class="pcard ${open ? "" : "done"} ${openId === m.id ? "open" : ""}" data-id="${esc(m.id)}" data-ids="${ids}">
         <div class="pc-top"><span class="pdot ${esc(t.prioridade || "")}" title="${esc(t.prioridade || "")}"></span><b>${esc(m.from_name || m.from_addr)}</b><time class="${late ? "late" : ""}">${late ? "esperando há " : "há "}${esc(ago(m))}</time></div>
-        <div class="pc-subj">${esc(m.subject)}</div>
+        <div class="pc-subj">${esc(m.subject)}</div>${tagHtml}
         <div class="pc-do">${t.tarefa ? `<b>${esc(t.tarefa)}</b>` : esc(t.motivo || "")}${state ? ` · <span>${state}</span>` : ""}${m.draft ? " · resposta pronta" : ""}</div>
         <div class="pc-act">${btns.join("")}</div>
         ${openId === m.id ? detail(m) : ""}
@@ -306,9 +330,9 @@
     if (open && others.length) btns.push(`<select class="passsel" data-passsel aria-label="Passar para"><option value="">Passar para…</option>${others.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select>`);
     if (!open) btns.push(`<button type="button" class="btn ghost" data-act="reabrir">Reabrir</button>`);
     btns.push(`<button type="button" class="linkbtn" data-toggle="${esc(m.id)}" aria-expanded="${openId === m.id}">${openId === m.id ? "Fechar" : "Ver e-mail"}${h.notes ? ` · ${plural(h.notes, "nota", "notas")}` : ""}</button>`);
-    return `<article class="pcard ${open ? "" : "done"} ${openId === m.id ? "open" : ""}" data-id="${esc(m.id)}">
+    return `<article class="pcard ${open ? "" : "done"} ${openId === m.id ? "open" : ""}" data-id="${esc(m.id)}" data-ids="${ids}">
       <div class="pc-top"><span class="pdot ${esc(t.prioridade || "")}" title="${esc(t.prioridade || "")}"></span><b>${esc(m.from_name || m.from_addr)}</b><time class="${late ? "late" : ""}">${late ? "esperando há " : "há "}${esc(ago(m))}</time></div>
-      <div class="pc-subj">${esc(m.subject)}</div>
+      <div class="pc-subj">${esc(m.subject)}</div>${tagHtml}
       <div class="pc-do">${t.tarefa ? `<b>${esc(t.tarefa)}</b> · ` : ""}<span>${who}</span>${state ? ` · <span>${state}</span>` : ""}${m.draft ? " · resposta pronta" : ""}</div>
       <div class="pc-act">${btns.join("")}</div>
       ${openId === m.id ? detail(m) : ""}
@@ -465,10 +489,10 @@
     $("gAsk") && ($("gAsk").onsubmit = async ev => { ev.preventDefault(); const t = $("gAskIn").value.trim(); if (!t) return; const p = person && D.members.find(m => m.id === person); await G().openChat(current || null); G().ask(p ? `Sobre ${p.id === G().S.me.id ? "os meus e-mails" : "os e-mails de " + p.name}: ${t}` : t); });
     root.querySelectorAll("[data-toggle]").forEach(b => b.onclick = () => { openId = openId === b.dataset.toggle ? null : b.dataset.toggle; draw(); });
     root.querySelectorAll(".pcard").forEach(c => {
-      const id = c.dataset.id;
-      c.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act([id], { assumir: { dono: "eu" }, resolver: { situacao: "resolvido" }, aguardar: { situacao: "aguardando" }, reabrir: { situacao: "andamento" } }[b.dataset.act], b.dataset.act));
-      c.querySelectorAll("[data-pass]").forEach(b => b.onclick = () => act([id], { dono: Number(b.dataset.pass) }, "passar"));
-      const sel = c.querySelector("[data-passsel]"); if (sel) sel.onchange = () => sel.value && act([id], { dono: Number(sel.value) }, "passar");
+      const id = c.dataset.id, ids = (c.dataset.ids || id).split(",");
+      c.querySelectorAll("[data-act]").forEach(b => b.onclick = () => act(ids, { assumir: { dono: "eu" }, resolver: { situacao: "resolvido" }, aguardar: { situacao: "aguardando" }, reabrir: { situacao: "andamento" } }[b.dataset.act], b.dataset.act));
+      c.querySelectorAll("[data-pass]").forEach(b => b.onclick = () => act(ids, { dono: Number(b.dataset.pass) }, "passar"));
+      const sel = c.querySelector("[data-passsel]"); if (sel) sel.onchange = () => sel.value && act(ids, { dono: Number(sel.value) }, "passar");
       const note = c.querySelector("[data-note]");
       if (note) note.onsubmit = async ev => {
         ev.preventDefault();

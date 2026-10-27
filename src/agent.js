@@ -21,15 +21,16 @@ function boxFor(user, groupId) {
 const boxRules = (company, box) => box.group ? groups.rulesFor(box.group, rulesOf(company)) : rulesOf(company);
 function saveRules(companyId, rules) { run("UPDATE companies SET rules_json = ? WHERE id = ?", JSON.stringify(rules), companyId); }
 
-function systemPrompt(user, company, rules, inbox, boxInfo = { group: null }) {
+const ROLE = m => m.papel === "cc" ? "você está EM CÓPIA" : m.papel === "grupo" ? `chegou via grupo/lista ${m.via || ""}` : "para você";
+function systemPrompt(user, company, rules, inbox, boxInfo = { group: null }, { bodyMax = 1800, title } = {}) {
   const g = boxInfo.group;
   const sector = SECTORS[company.sector] || SECTORS.geral;
   const box = inbox.map(m => `--- E-MAIL ${m.id}
-De: ${m.from_name || ""} <${m.from_addr}>
+De: ${m.from_name || ""} <${m.from_addr}>${g ? "" : ` · ${ROLE(m)}`}
 Assunto: ${m.subject}
-Recebido há ${hours(m)} h · ${m.replied ? "já respondido" : isLate(m, rules) ? "SEM RESPOSTA, ATRASADO" : "aguardando resposta"}
-${String(m.body).slice(0, 1800)}
-${m.attachments.map(a => `[Anexo: ${a.name}]${a.text ? "\n" + String(a.text).slice(0, 1800) : " (conteúdo não lido)"}`).join("\n")}
+Recebido há ${hours(m)} h · ${m.answered_by ? `já respondido por ${m.answered_by} (colega)` : m.replied ? "já respondido" : isLate(m, rules) ? "SEM RESPOSTA, ATRASADO" : "aguardando resposta"}
+${String(m.body).slice(0, bodyMax)}
+${m.attachments.map(a => `[Anexo: ${a.name}]${a.text ? "\n" + String(a.text).slice(0, bodyMax) : " (conteúdo não lido)"}`).join("\n")}
 ${m.triage ? `[Já qualificado: ${m.triage.prioridade} · ${m.triage.categoria || ""} · responsável sugerido ${m.triage.responsavel || "-"}]` : "[Ainda não qualificado]"}${m.draft ? " [Já tem rascunho]" : ""}${g ? ` [Dono: ${m.handling.assignee || "sem dono"} · situação: ${groups.STATUS[m.handling.status] || m.handling.status}${m.handling.notes ? ` · ${m.handling.notes} nota(s) interna(s)` : ""}]` : ""}`).join("\n\n");
 
   const whose = g
@@ -70,7 +71,13 @@ Quem assina: ${user.name}, ${company.name}.
 
 CATEGORIAS POSSÍVEIS: ${sector.cats.join(", ")}
 
-CAIXA (${inbox.length} e-mails mais recentes)
+${g ? "" : `PAPEL DE ${user.name.toUpperCase()} EM CADA E-MAIL
+- "para você": cobra resposta normalmente.
+- "em cópia": só acompanhamento. Só trate como pendência de ${user.name} se o texto pedir algo diretamente a ${user.name} (pelo nome) ou se for urgente para ela/ele.
+- "via grupo/lista": chegou por um grupo do qual ${user.name} faz parte; pode ser de outra pessoa do grupo.
+- "já respondido por (colega)": alguém da empresa já respondeu; não cobre de ${user.name}.
+`}
+${title || `CAIXA (${inbox.length} e-mails: primeiro os em aberto, depois os mais recentes)`}
 ${box || "(vazia)"}`;
 }
 
@@ -194,16 +201,27 @@ function history(userId, boxId, n = 12) {
   return out;
 }
 
+// Contexto da conversa com caixa cheia: tudo o que está em aberto (até 50, os mais importantes primeiro)
+// e os 15 mais recentes, para a IA enxergar o que importa sem ler a caixa inteira.
+const PRI_ORDER = { urgente: 0, alta: 1, normal: 2, baixa: 3 };
+function chatContext(boxId) {
+  const all = mail.inbox(boxId, 500);
+  const open = all.filter(m => !m.replied && m.handling.status !== "resolvido")
+    .sort((a, b) => (PRI_ORDER[a.triage?.prioridade] ?? 2) - (PRI_ORDER[b.triage?.prioridade] ?? 2) || a.received_at - b.received_at).slice(0, 50);
+  const ids = new Set(open.map(m => m.id));
+  return [...open, ...all.filter(m => !ids.has(m.id)).slice(0, 15)];
+}
+
 async function chat(user, company, text, box = { id: user.id, group: null }) {
   const rules = boxRules(company, box);
-  const inbox = mail.inbox(box.id, 40);
+  const inbox = chatContext(box.id);
   const cards = [];
   const boxKey = box.group ? box.id : null;
   run("INSERT INTO chats (user_id, box_id, role, text, cards_json, created_at) VALUES (?, ?, 'user', ?, '[]', ?)", user.id, boxKey, text, now());
   const messages = [...history(user.id, boxKey, 13).slice(0, -1), { role: "user", content: text }];
   let reply = { text: "", error: null };
   try {
-    const r = await ai.run({ system: systemPrompt(user, company, rules, inbox, box), messages, tools: tools({ user, company, cards, box }), mockState: { inbox, team: rules.team || [], me: user, group: box.group } });
+    const r = await ai.run({ system: systemPrompt(user, company, rules, inbox, box, { bodyMax: 1200 }), messages, tools: tools({ user, company, cards, box }), mockState: { inbox, team: rules.team || [], me: user, group: box.group } });
     reply.text = r.text || (cards.length ? "" : "Pronto.");
     ai.recordUsage({ companyId: company.id, userId: user.id, kind: "chat", model: r.model, usage: r.usage });
   } catch (e) {
@@ -215,22 +233,36 @@ async function chat(user, company, text, box = { id: user.id, group: null }) {
 }
 
 // Qualificação automática dos e-mails novos (roda em segundo plano, sem aparecer na conversa).
+// Caixa cheia: só os ainda não qualificados, em lotes, com o modelo rápido, até zerar a fila.
 // boxUser = a pessoa dona da caixa, ou a linha da caixa do grupo.
+const BATCH = 20, MAX_BATCHES = 15;
+const triaging = new Set(); // uma qualificação por caixa de cada vez
 async function autoTriage(boxUser, company) {
+  if (triaging.has(boxUser.id)) return -1;
+  triaging.add(boxUser.id);
+  try { return await triageLoop(boxUser, company); } finally { triaging.delete(boxUser.id); }
+}
+async function triageLoop(boxUser, company) {
   const g = boxUser.kind === "grupo" ? groups.byBox(boxUser.id) : null;
   const box = { id: boxUser.id, group: g };
   const user = g ? { ...boxUser, name: "equipe do grupo " + g.name, role: "membro" } : boxUser;
-  const inbox = mail.inbox(box.id, 40);
-  if (!inbox.some(m => !m.triage)) return 0;
   const rules = boxRules(company, box);
-  const r = await ai.run({
-    system: systemPrompt(user, company, rules, inbox, box),
-    messages: [{ role: "user", content: "Tarefa automática: qualifique com registrar_qualificacao todos os e-mails marcados como ainda não qualificados, numa única chamada. Não escreva rascunhos. Responda apenas 'ok'." }],
-    tools: tools({ user, company, cards: null, box }).filter(t => ["registrar_qualificacao", "ler_caixa"].includes(t.name)),
-    mockState: { inbox, team: rules.team || [] }, maxRounds: 3, allowFallback: true
-  });
-  ai.recordUsage({ companyId: company.id, userId: g ? null : user.id, kind: "auto", model: r.model, usage: r.usage });
-  return inbox.filter(m => !m.triage).length;
+  const pendingOf = () => mail.inbox(box.id, 1000).filter(m => !m.triage && !m.replied);
+  let pending = pendingOf();
+  for (let i = 0; i < MAX_BATCHES && pending.length; i++) {
+    const lote = pending.slice(0, BATCH); // mais recentes primeiro
+    const r = await ai.run({
+      system: systemPrompt(user, company, rules, lote, box, { bodyMax: 1500, title: `E-MAILS PARA QUALIFICAR AGORA (${lote.length})` }),
+      messages: [{ role: "user", content: `Tarefa automática: qualifique com registrar_qualificacao todos os ${lote.length} e-mails acima, numa única chamada. Não escreva rascunhos. Responda apenas 'ok'.` }],
+      tools: tools({ user, company, cards: null, box }).filter(t => t.name === "registrar_qualificacao"),
+      mockState: { inbox: lote, team: rules.team || [] }, maxRounds: 2, maxTokens: 8000, fast: true, allowFallback: true
+    });
+    ai.recordUsage({ companyId: company.id, userId: g ? null : user.id, kind: "auto", model: r.model, usage: r.usage });
+    const next = pendingOf();
+    if (next.length >= pending.length) break; // a IA não avançou: tenta de novo na próxima leitura
+    pending = next;
+  }
+  return pending.length;
 }
 
 module.exports = { chat, autoTriage, rulesOf, saveRules, isLate, boxFor, boxRules };

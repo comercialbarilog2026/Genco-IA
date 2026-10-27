@@ -27,9 +27,9 @@ function build(user) {
   // Caixa própria
   if (mail.account(user.id)) {
     const late = m => agent.isLate(m, rules);
-    const box = mail.inbox(user.id, 200).filter(isOpen).filter(m => !m.replied && m.handling.status !== "aguardando");
+    const box = mail.inbox(user.id, 400, { bodyMax: 4000 }).filter(isOpen).filter(m => !m.replied && m.handling.status !== "aguardando");
     const now_ = box.filter(m => m.triage?.prioridade === "urgente" || late(m) || m.triage?.prioridade === "alta").sort(byUrgency(late));
-    const ready = mail.inbox(user.id, 200).filter(isOpen).filter(m => m.draft && !m.replied);
+    const ready = mail.inbox(user.id, 400, { bodyMax: 4000 }).filter(isOpen).filter(m => m.draft && !m.replied);
     if (now_.length) sections.push({ title: "Sua caixa: responda primeiro", items: now_.slice(0, 10), more: now_.length - 10, late });
     if (ready.length) sections.push({ title: `${plural(ready.length, "resposta pronta", "respostas prontas")} no seu e-mail para revisar`, items: ready.slice(0, 5), more: ready.length - 5, late });
     total += now_.length; lateTotal += now_.filter(late).length;
@@ -40,7 +40,7 @@ function build(user) {
   for (const gm of myGroups) {
     const g = groups.byBox(gm.group_id); if (!g || !mail.account(g.user_id)) continue;
     const r = groups.rulesFor(g, rules), late = m => agent.isLate(m, r);
-    const open = mail.inbox(g.user_id, 200).filter(isOpen);
+    const open = mail.inbox(g.user_id, 400, { bodyMax: 4000 }).filter(isOpen);
     const mine = open.filter(m => m.handling.assignee_id === user.id && m.handling.status !== "aguardando").sort(byUrgency(late));
     const noOwner = open.filter(m => !m.handling.assignee_id && m.triage?.prioridade !== "baixa").sort(byUrgency(late));
     if (mine.length) sections.push({ title: `Grupo ${g.name}: com você`, items: mine.slice(0, 10), more: mine.length - 10, late });

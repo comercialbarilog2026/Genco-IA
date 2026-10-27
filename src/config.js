@@ -24,6 +24,8 @@ const config = {
   ai: {
     provider: env("AI_PROVIDER", "mock").toLowerCase(),
     model: env("AI_MODEL"),
+    // Modelo rápido e barato para o trabalho de volume (qualificar e-mails, ler PDFs). Vazio = padrão do provedor.
+    fastModel: env("AI_FAST_MODEL"),
     anthropicKey: env("ANTHROPIC_API_KEY"),
     openaiKey: env("OPENAI_API_KEY"),
     monthlyLimitPerUser: num("AI_MONTHLY_LIMIT_PER_USER", 600)
@@ -40,7 +42,7 @@ const config = {
   billing: env("BILLING", "off") === "on",
   // Só e-mails destes domínios podem criar conta (separados por vírgula). Vazio = qualquer domínio.
   allowedDomains: env("ALLOWED_DOMAINS", "").split(/[,\s]+/).map(d => d.trim().toLowerCase().replace(/^@/, "")).filter(Boolean),
-  syncMinutes: num("SYNC_MINUTES", 15),
+  syncMinutes: num("SYNC_MINUTES", 5),
   autoTriage: env("AUTO_TRIAGE", "true") !== "false",
   production: env("NODE_ENV") === "production"
 };

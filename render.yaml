@@ -54,6 +54,6 @@ services:
       - key: DIGEST_HOUR
         value: "8"
       - key: SYNC_MINUTES
-        value: "15"
+        value: "5"
       - key: TRIAL_DAYS
         value: "14"

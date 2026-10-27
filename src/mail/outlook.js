@@ -32,36 +32,59 @@ async function api(access, method, path, body, headers = {}) {
   return d;
 }
 
-async function fetchRecent(access, { days = 7, max = 40, knownIds = new Set() } = {}) {
+async function pmap(items, n, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
+  return out;
+}
+async function pages(access, url, cap, headers) {
+  const all = [];
+  while (url && all.length < cap) { const d = await api(access, "GET", url, null, headers); all.push(...(d.value || [])); url = d["@odata.nextLink"] || ""; }
+  return all.slice(0, cap);
+}
+const addrs = list => (list || []).map(r => String(r.emailAddress?.address || "").toLowerCase()).filter(Boolean);
+
+// Todos os e-mails novos (não só os últimos): primeiro a lista leve, depois o conteúdo só dos novos.
+async function fetchRecent(access, { days = 7, max = 300, knownIds = new Set() } = {}) {
   const since = new Date(Date.now() - days * 864e5).toISOString();
   const textPref = { Prefer: 'outlook.body-content-type="text"' };
-  const inbox = await api(access, "GET", `/me/mailFolders/inbox/messages?$top=${max}&$orderby=receivedDateTime desc&$filter=receivedDateTime ge ${since}&$select=id,conversationId,internetMessageId,subject,from,receivedDateTime,body,hasAttachments`, null, textPref);
-  const sent = await api(access, "GET", `/me/mailFolders/sentitems/messages?$top=60&$orderby=sentDateTime desc&$select=conversationId,sentDateTime`);
+  const refs = await pages(access, `/me/mailFolders/inbox/messages?$top=200&$orderby=receivedDateTime desc&$filter=receivedDateTime ge ${since}&$select=id,conversationId,receivedDateTime`, 3000);
+  const sent = await pages(access, `/me/mailFolders/sentitems/messages?$top=200&$orderby=sentDateTime desc&$filter=sentDateTime ge ${new Date(Date.now() - (days + 2) * 864e5).toISOString()}&$select=conversationId,sentDateTime`, 1500);
   const lastSent = {};
-  for (const s of sent.value || []) lastSent[s.conversationId] = Math.max(lastSent[s.conversationId] || 0, Date.parse(s.sentDateTime));
-  const out = [];
-  for (const m of inbox.value || []) {
-    if (knownIds.has(m.id)) { out.push({ provider_id: m.id, known: true, thread_id: m.conversationId, lastSent: lastSent[m.conversationId] || 0 }); continue; }
+  for (const s of sent) lastSent[s.conversationId] = Math.max(lastSent[s.conversationId] || 0, Date.parse(s.sentDateTime));
+  const out = [], fresh = [];
+  for (const r of refs) {
+    if (knownIds.has(r.id)) { out.push({ provider_id: r.id, known: true, thread_id: r.conversationId, lastSent: lastSent[r.conversationId] || 0 }); continue; }
+    if (fresh.length < max) fresh.push(r);
+  }
+  const full = await pmap(fresh, 8, r => api(access, "GET", `/me/messages/${r.id}?$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments,internetMessageHeaders`, null, textPref).catch(e => { console.error("[outlook]", e.message); return null; }));
+  for (const m of full) {
+    if (!m) continue;
     const attachments = [];
     if (m.hasAttachments) {
-      const at = await api(access, "GET", `/me/messages/${m.id}/attachments?$select=name,contentType,size`);
-      for (const a of (at.value || []).slice(0, 5)) {
-        const item = { name: a.name, mime: a.contentType, size: a.size };
-        const isText = /^text\//.test(a.contentType || "") || /\.(txt|csv)$/i.test(a.name);
-        const isPdf = a.contentType === "application/pdf" || /\.pdf$/i.test(a.name);
-        if ((isText && a.size <= 200_000) || (isPdf && a.size <= 4_000_000)) {
-          const full = await api(access, "GET", `/me/messages/${m.id}/attachments/${a.id}`);
-          if (full.contentBytes) { if (isText) item.text = Buffer.from(full.contentBytes, "base64").toString("utf8").slice(0, 20000); else item.pdfBase64 = full.contentBytes; }
+      try {
+        const at = await api(access, "GET", `/me/messages/${m.id}/attachments?$select=name,contentType,size`);
+        for (const a of (at.value || []).slice(0, 5)) {
+          const item = { name: a.name, mime: a.contentType, size: a.size };
+          const isText = /^text\//.test(a.contentType || "") || /\.(txt|csv)$/i.test(a.name);
+          const isPdf = a.contentType === "application/pdf" || /\.pdf$/i.test(a.name);
+          if ((isText && a.size <= 200_000) || (isPdf && a.size <= 4_000_000)) {
+            const f = await api(access, "GET", `/me/messages/${m.id}/attachments/${a.id}`);
+            if (f.contentBytes) { if (isText) item.text = Buffer.from(f.contentBytes, "base64").toString("utf8").slice(0, 20000); else item.pdfBase64 = f.contentBytes; }
+          }
+          attachments.push(item);
         }
-        attachments.push(item);
-      }
+      } catch (e) { console.error("[outlook anexo]", e.message); }
     }
+    const hdr = n => (m.internetMessageHeaders || []).filter(h => h.name.toLowerCase() === n).map(h => String(h.value).toLowerCase());
     const received = Date.parse(m.receivedDateTime);
     out.push({
       provider_id: m.id, thread_id: m.conversationId, internet_message_id: m.internetMessageId,
       from_name: m.from?.emailAddress?.name || "", from_addr: m.from?.emailAddress?.address || "",
       subject: m.subject || "(sem assunto)", body: String(m.body?.content || "").slice(0, 20000),
-      received_at: received, replied: (lastSent[m.conversationId] || 0) > received, attachments
+      received_at: received, replied: (lastSent[m.conversationId] || 0) > received, attachments,
+      to: addrs(m.toRecipients), cc: addrs(m.ccRecipients),
+      delivered: [...hdr("delivered-to"), ...hdr("x-original-to"), ...hdr("list-id")], in_reply_to: hdr("in-reply-to")[0] || ""
     });
   }
   return out;

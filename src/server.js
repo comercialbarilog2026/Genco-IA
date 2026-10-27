@@ -461,13 +461,13 @@ router.get("/api/team/overview", async (ctx) => {
   requireRole(user, "admin", "gestor");
   const rules = agent.rulesOf(company);
   const people = all("SELECT id, name, email, role, invite_token IS NOT NULL AS pending FROM users WHERE company_id = ? AND kind = 'pessoa' ORDER BY name", company.id).map(p => {
-    const acc = mail.account(p.id), box = acc ? mail.inbox(p.id, 200) : [];
+    const acc = mail.account(p.id), box = acc ? mail.inbox(p.id, 400, { bodyMax: 1 }) : [];
     return { name: p.name, email: p.email, role: p.role, pending: !!p.pending, connected: acc ? (acc.provider === "demo" ? "demonstração" : acc.provider) : null, lastSync: acc?.last_sync_at || null,
       total: box.length, late: box.filter(m => agent.isLate(m, rules)).length, urgent: box.filter(m => m.triage?.prioridade === "urgente" && !m.replied).length,
       drafts: box.filter(m => m.draft).length, untriaged: box.filter(m => !m.triage).length };
   });
   const groupStats = groups.list(user).map(gp => {
-    const g = groups.get(company.id, gp.id), r = groups.rulesFor(g, rules), box = mail.inbox(g.user_id, 200);
+    const g = groups.get(company.id, gp.id), r = groups.rulesFor(g, rules), box = mail.inbox(g.user_id, 400, { bodyMax: 4000 });
     const o = groups.overview(g, box, m => agent.isLate(m, r));
     return { id: gp.id, name: gp.name, address: gp.address, connected: !!mail.account(g.user_id), abertos: o.abertos, semDono: o.semDono, atrasados: o.atrasados, urgentes: o.urgentes, resolvidos7d: o.resolvidos7d };
   });
@@ -490,7 +490,7 @@ router.get("/api/me/box", async (ctx) => {
     personal: true, group: { id: 0, name: "Minha caixa", address: acc?.address || "", autoAtribuir: false, groupLogin: false },
     canManage: false, isMember: false, members: [], statuses: groups.STATUS, atraso: rules.atraso,
     account: acc ? { provider: acc.provider, address: acc.address, lastSync: acc.last_sync_at, error: acc.last_error } : null,
-    inbox: mail.inbox(user.id, 200)
+    inbox: mail.inbox(user.id, 400, { bodyMax: 4000 })
   });
 });
 router.post("/api/me/handling", async (ctx) => {
@@ -498,7 +498,7 @@ router.post("/api/me/handling", async (ctx) => {
   requireAccess(company);
   const ids = (Array.isArray(ctx.body.ids) ? ctx.body.ids : [ctx.body.id]).filter(Boolean).map(String).slice(0, 200);
   try { groups.setHandling({ user_id: user.id, company_id: company.id }, ids, { status: String(ctx.body.situacao) }, user.id); } catch (e) { throw new HttpError(400, e.message); }
-  send(ctx.res, 200, { inbox: mail.inbox(user.id, 200) });
+  send(ctx.res, 200, { inbox: mail.inbox(user.id, 400, { bodyMax: 4000 }) });
 });
 
 router.get("/api/people", async (ctx) => {
@@ -543,7 +543,7 @@ router.get("/api/groups/:id", async (ctx) => {
   const { user, company } = auth(ctx);
   const g = groupOf(ctx, user);
   const rules = groups.rulesFor(g, agent.rulesOf(company));
-  const inbox = mail.inbox(g.user_id, 200);
+  const inbox = mail.inbox(g.user_id, 400, { bodyMax: 4000 });
   const acc = mail.account(g.user_id);
   send(ctx.res, 200, {
     group: groups.publicGroup(g), canManage: groups.canManage(user), isMember: groups.isMember(g.user_id, user.id),
@@ -644,7 +644,7 @@ router.post("/api/groups/:id/handling", async (ctx) => {
   let changed;
   try { changed = groups.setHandling(g, ids, patch, user.id); } catch (e) { throw new HttpError(400, e.message); }
   if ("assigneeId" in patch) mail.labelMessages(g.user_id, changed);
-  send(ctx.res, 200, { changed: changed.length, inbox: mail.inbox(g.user_id, 200) });
+  send(ctx.res, 200, { changed: changed.length, inbox: mail.inbox(g.user_id, 400, { bodyMax: 4000 }) });
 });
 router.get("/api/groups/:id/messages/:mid", async (ctx) => {
   const { user } = auth(ctx);
@@ -687,7 +687,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Leitura automática das caixas + qualificação dos e-mails novos.
+let ticking = false; // uma rodada de leitura por vez (caixa cheia pode levar mais que o intervalo)
 async function tick() {
+  if (ticking) return; ticking = true;
+  try { await tickAll(); } finally { ticking = false; }
+}
+async function tickAll() {
   const rows = all("SELECT a.user_id FROM mail_accounts a");
   for (const r of rows) {
     const user = one("SELECT * FROM users WHERE id = ?", r.user_id); if (!user) continue;

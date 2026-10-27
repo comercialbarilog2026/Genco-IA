@@ -27,7 +27,7 @@ async function run({ messages, tools, mockState }) {
       return { id: m.id, prioridade, categoria: "", responsavel: pickOwner(m, team), motivo: prioridade === "urgente" ? "Pede ação imediata pelo conteúdo do e-mail." : prioridade === "baixa" ? "Informativo, sem ação." : "Pede acompanhamento.", tarefa: "Responder " + (m.from_name || m.from_addr), prazo: "", divergencias: [] };
     }) });
   }
-  const fresh = (await tool("ler_caixa").execute({})).emails;
+  const fresh = (await tool("ler_caixa").execute({})).emails || [];
   const urg = fresh.filter(m => m.prioridade === "urgente");
   const late = fresh.filter(m => m.atrasado);
   if (/rascunho|respost|responda|prepare/.test(user)) {
