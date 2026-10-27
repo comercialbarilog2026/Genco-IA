@@ -1,6 +1,6 @@
 # GENCO IA
 
-Assistente de e-mails com IA para equipes, com **assinatura própria**. Cada funcionário conecta o próprio Gmail ou Outlook e conversa com a GENCO IA: ela qualifica os e-mails por urgência, indica quem deve cuidar de cada um, confere anexos e deixa respostas prontas como rascunho no próprio e-mail. O gestor vê os indicadores da equipe sem acessar o conteúdo dos e-mails.
+Assistente de e-mails com IA para as equipes do grupo (uso interno, sem cobrança; a parte de assinatura fica desligada e só volta com `BILLING=on`). Cada funcionário conecta o próprio Gmail ou Outlook e conversa com a GENCO IA: ela qualifica os e-mails por urgência, indica quem deve cuidar de cada um, confere anexos e deixa respostas prontas como rascunho no próprio e-mail. O gestor vê os indicadores da equipe sem acessar o conteúdo dos e-mails.
 
 O cliente paga apenas a assinatura da GENCO IA. O modelo de IA é contratado pela empresa por API, e esse custo entra no preço da assinatura. Nenhum cliente precisa de conta no Claude, ChatGPT ou similar.
 
